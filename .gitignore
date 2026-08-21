@@ -53,3 +53,30 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build directories and generated artifacts
+build/
+bin/
+obj/
+out/
+autom4te.cache/
+config.status
+config.log
+
+# Python host tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# Local environment and editor files
+*.log
+.env*
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/

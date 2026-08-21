@@ -1,0 +1,161 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 4, "minor": 1, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "cross-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "INFERENCEOS_BUILD_KERNEL": "ON",
+        "INFERENCEOS_BUILD_HOST_TESTS": "OFF",
+        "INFERENCEOS_ENABLE_QEMU_TESTS": "ON"
+      }
+    },
+    {
+      "name": "host-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "INFERENCEOS_BUILD_KERNEL": "OFF",
+        "INFERENCEOS_BUILD_HOST_TESTS": "ON",
+        "INFERENCEOS_ENABLE_QEMU_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "gcc-reference",
+      "displayName": "GCC 16.2 reference kernel",
+      "inherits": "cross-base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/gcc-x86_64-elf.cmake"
+    },
+    {
+      "name": "clang-validation",
+      "displayName": "Clang/LLVM 22.1.8 validation kernel",
+      "inherits": "cross-base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/clang-x86_64-none-elf.cmake",
+      "cacheVariables": { "INFERENCEOS_ENABLE_QEMU_TESTS": "OFF" }
+    },
+    {
+      "name": "gcc-host",
+      "displayName": "GCC host unit tests",
+      "inherits": "host-base",
+      "cacheVariables": { "CMAKE_C_COMPILER": "gcc" }
+    },
+    {
+      "name": "clang-host",
+      "displayName": "Clang host unit tests",
+      "inherits": "host-base",
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "gcc-reference", "configurePreset": "gcc-reference" },
+    { "name": "clang-validation", "configurePreset": "clang-validation" },
+    { "name": "gcc-host", "configurePreset": "gcc-host" },
+    { "name": "clang-host", "configurePreset": "clang-host" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "gcc-host",
+      "displayName": "GCC host unit tests",
+      "inherits": "test-base",
+      "configurePreset": "gcc-host",
+      "filter": { "include": { "label": "^unit$" } }
+    },
+    {
+      "name": "clang-host",
+      "displayName": "Clang host unit tests",
+      "inherits": "test-base",
+      "configurePreset": "clang-host",
+      "filter": { "include": { "label": "^unit$" } }
+    },
+    {
+      "name": "qemu-integration",
+      "displayName": "QEMU integration scenarios",
+      "inherits": "test-base",
+      "configurePreset": "gcc-reference",
+      "filter": { "include": { "label": "^qemu-integration$" } }
+    },
+    {
+      "name": "qemu-persistence",
+      "displayName": "QEMU persistence scenarios",
+      "inherits": "test-base",
+      "configurePreset": "gcc-reference",
+      "filter": { "include": { "label": "^qemu-persistence$" } }
+    },
+    {
+      "name": "image-corruption",
+      "displayName": "InferenceFS image corruption matrix",
+      "inherits": "test-base",
+      "configurePreset": "gcc-reference",
+      "filter": { "include": { "label": "^image-corruption$" } }
+    },
+    {
+      "name": "block-faults",
+      "displayName": "Block mutation fault injection",
+      "inherits": "test-base",
+      "configurePreset": "gcc-reference",
+      "filter": { "include": { "label": "^block-faults$" } }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "gcc-reference-build",
+      "steps": [
+        { "type": "configure", "name": "gcc-reference" },
+        { "type": "build", "name": "gcc-reference" }
+      ]
+    },
+    {
+      "name": "clang-validation-build",
+      "steps": [
+        { "type": "configure", "name": "clang-validation" },
+        { "type": "build", "name": "clang-validation" }
+      ]
+    },
+    {
+      "name": "gcc-host-tests",
+      "steps": [
+        { "type": "configure", "name": "gcc-host" },
+        { "type": "build", "name": "gcc-host" },
+        { "type": "test", "name": "gcc-host" }
+      ]
+    },
+    {
+      "name": "clang-host-tests",
+      "steps": [
+        { "type": "configure", "name": "clang-host" },
+        { "type": "build", "name": "clang-host" },
+        { "type": "test", "name": "clang-host" }
+      ]
+    },
+    {
+      "name": "reference-validation",
+      "steps": [
+        { "type": "configure", "name": "gcc-reference" },
+        { "type": "build", "name": "gcc-reference" },
+        { "type": "test", "name": "qemu-integration" },
+        { "type": "test", "name": "qemu-persistence" },
+        { "type": "test", "name": "image-corruption" },
+        { "type": "test", "name": "block-faults" }
+      ]
+    }
+  ]
+}

@@ -31,6 +31,7 @@ from qemu_harness import QemuHarness  # noqa: E402
 
 
 PROMPT = b"InferenceOS>"
+CLEAN_BOOT_COUNT = 20
 COMMAND_TIMEOUT_SECONDS = 5.0
 REQUIRED_CORE_HELP_COMMANDS = (b"help", b"version", b"clear")
 
@@ -152,6 +153,15 @@ class BootPromptTranscriptTests(unittest.TestCase):
             ).lower()
             self.assertIn(b"unknown command", response)
             self.assertTrue(response.rstrip().endswith(PROMPT.lower()))
+
+    def test_twenty_consecutive_clean_boots_reach_prompt(self) -> None:
+        for boot_number in range(1, CLEAN_BOOT_COUNT + 1):
+            with self.subTest(boot_number=boot_number):
+                with self._harness() as harness:
+                    transcript = harness.wait_for(PROMPT)
+                    self.assertIn(b"InferenceOS", transcript)
+                    self.assertNotIn(b"PANIC:", transcript)
+                    self.assertFalse(harness.transcript_truncated)
 
     def test_panic_transcript_is_bounded_and_does_not_reach_prompt(self) -> None:
         panic_image = _optional_path("INFERENCEOS_PANIC_BOOT_IMAGE")

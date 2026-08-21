@@ -194,6 +194,41 @@ typedef struct inferenceos_vfs_filesystem {
     void *filesystem_context;
 } inferenceos_vfs_filesystem;
 
+/* Single-root VFS facade used by filesystem-independent kernel and command
+ * code. Adapter-owned mount and node objects remain opaque across this API. */
+inferenceos_vfs_status inferenceos_vfs_mount_root(
+    const inferenceos_vfs_filesystem *filesystem,
+    inferenceos_vfs_mount_state *state
+);
+
+inferenceos_vfs_status inferenceos_vfs_unmount_root(void);
+
+inferenceos_vfs_status inferenceos_vfs_root_state(
+    inferenceos_vfs_mount_state *state
+);
+
+inferenceos_vfs_status inferenceos_vfs_sync_root(void);
+
+inferenceos_vfs_status inferenceos_vfs_resolve(
+    inferenceos_vfs_node *current_directory,
+    inferenceos_vfs_path path,
+    inferenceos_vfs_node **node
+);
+
+inferenceos_vfs_status inferenceos_vfs_release_node(
+    inferenceos_vfs_node *node
+);
+
+inferenceos_vfs_status inferenceos_vfs_create(
+    inferenceos_vfs_node *current_directory,
+    inferenceos_vfs_path path
+);
+
+inferenceos_vfs_status inferenceos_vfs_metadata_query(
+    const inferenceos_vfs_node *node,
+    inferenceos_vfs_metadata *metadata
+);
+
 static inline bool inferenceos_vfs_status_is_success(
     inferenceos_vfs_status status
 )

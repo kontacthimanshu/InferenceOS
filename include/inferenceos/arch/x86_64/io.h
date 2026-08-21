@@ -21,4 +21,19 @@ static inline inferenceos_u8 inferenceos_arch_in8(inferenceos_u16 port)
     return value;
 }
 
+static inline void inferenceos_arch_out16(
+    inferenceos_u16 port,
+    inferenceos_u16 value
+)
+{
+    __asm__ __volatile__("outw %0, %1" : : "a"(value), "Nd"(port) : "memory");
+}
+
+static inline inferenceos_u16 inferenceos_arch_in16(inferenceos_u16 port)
+{
+    inferenceos_u16 value;
+    __asm__ __volatile__("inw %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    return value;
+}
+
 #endif

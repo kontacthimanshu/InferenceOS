@@ -1,5 +1,6 @@
 #include <inferenceos/panic.h>
 #include <inferenceos/serial.h>
+#include <inferenceos/arch/x86_64/cpu.h>
 
 static void panic_write(const char *text, inferenceos_size capacity)
 {
@@ -25,11 +26,7 @@ static void panic_write_u32(inferenceos_u32 value)
 
 static INFERENCEOS_NORETURN void panic_stop(void)
 {
-    /* T033 supplies the architecture halt primitive. Until that layer is
-     * initialized, this compiler-barrier loop is safe in the earliest panic. */
-    for (;;) {
-        INFERENCEOS_COMPILER_BARRIER();
-    }
+    inferenceos_arch_halt();
 }
 
 INFERENCEOS_NORETURN void inferenceos_panic_bounded(

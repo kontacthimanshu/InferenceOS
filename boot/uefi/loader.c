@@ -1,7 +1,7 @@
 /* Minimal x86-64 UEFI loader.  Firmware calls are routed through the assembly
  * Microsoft-x64 bridge implemented by T031; this C file remains SysV C17. */
 
-#include <inferenceos/base.h>
+#include <inferenceos/boot.h>
 
 #define EFI_ERROR_BIT (UINT64_C(1) << 63)
 #define EFI_SUCCESS UINT64_C(0)
@@ -19,8 +19,6 @@
 #define ELF_MAX_PROGRAM_HEADERS 64U
 #define MEMORY_MAP_SLACK_DESCRIPTORS 16U
 #define EXIT_BOOT_SERVICES_ATTEMPTS 3U
-#define HANDOFF_MAGIC UINT64_C(0x31464F444E414849) /* "IHANDOF1" */
-#define HANDOFF_VERSION 1U
 
 typedef inferenceos_u64 efi_status;
 typedef void *efi_handle;
@@ -120,10 +118,7 @@ typedef struct efi_file_info {
     inferenceos_u16 file_name[1];
 } efi_file_info;
 
-typedef struct efi_pixel_bitmask {
-    inferenceos_u32 red; inferenceos_u32 green;
-    inferenceos_u32 blue; inferenceos_u32 reserved;
-} efi_pixel_bitmask;
+typedef inferenceos_framebuffer_masks efi_pixel_bitmask;
 
 typedef struct efi_gop_mode_info {
     inferenceos_u32 version;
@@ -162,24 +157,6 @@ typedef struct elf64_program_header {
     inferenceos_u64 physical_address; inferenceos_u64 file_size;
     inferenceos_u64 memory_size; inferenceos_u64 alignment;
 } elf64_program_header;
-
-typedef struct inferenceos_uefi_handoff {
-    inferenceos_u64 magic;
-    inferenceos_u32 version;
-    inferenceos_u32 size;
-    inferenceos_u64 memory_map;
-    inferenceos_u64 memory_map_size;
-    inferenceos_u64 memory_descriptor_size;
-    inferenceos_u32 memory_descriptor_version;
-    inferenceos_u32 reserved;
-    inferenceos_u64 framebuffer_base;
-    inferenceos_u64 framebuffer_size;
-    inferenceos_u32 horizontal_resolution;
-    inferenceos_u32 vertical_resolution;
-    inferenceos_u32 pixels_per_scan_line;
-    inferenceos_u32 pixel_format;
-    efi_pixel_bitmask pixel_masks;
-} inferenceos_uefi_handoff;
 
 INFERENCEOS_STATIC_ASSERT(sizeof(efi_table_header) == 24U, "UEFI header layout");
 INFERENCEOS_STATIC_ASSERT(sizeof(efi_time) == 16U, "UEFI time layout");
@@ -480,8 +457,8 @@ static efi_status build_handoff_and_exit(
     }
     handoff = (inferenceos_uefi_handoff *)(inferenceos_uptr)allocation_address;
     zero_bytes(handoff, allocation_pages * EFI_PAGE_SIZE);
-    handoff->magic = HANDOFF_MAGIC;
-    handoff->version = HANDOFF_VERSION;
+    handoff->magic = INFERENCEOS_UEFI_HANDOFF_MAGIC;
+    handoff->version = INFERENCEOS_UEFI_HANDOFF_VERSION;
     handoff->size = sizeof(*handoff);
     handoff->memory_map = allocation_address + map_offset;
     capture_gop(boot, handoff);

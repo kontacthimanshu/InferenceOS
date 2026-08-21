@@ -69,14 +69,14 @@
 ### Implementation for User Story 1
 
 - [x] T030 [P] [US1] Implement BOOTX64.EFI loader, checked ELF loading, UEFI memory-map capture, GOP handoff, and ExitBootServices flow in boot/uefi/loader.c
-- [ ] T031 [P] [US1] Implement isolated Microsoft-x64-to-SysV UEFI ABI trampoline and kernel entry shim in boot/uefi/abi_trampoline.S and arch/x86_64/entry.S
-- [ ] T032 [US1] Define reviewed fixed-address ELF64 kernel sections and exported bounds in arch/x86_64/kernel.ld
-- [ ] T033 [P] [US1] Implement GDT, IDT, exception stubs, CPU halt/reboot primitives, and assembly boundary comments in arch/x86_64/cpu.c and arch/x86_64/exceptions.S
-- [ ] T034 [P] [US1] Implement GOP framebuffer character console and serial fan-out in drivers/console/framebuffer.c and drivers/console/console.c
-- [ ] T035 [P] [US1] Implement bounded polling i8042/PS2 keyboard decoding for ASCII, Backspace, and Enter in drivers/input/ps2_keyboard.c
-- [ ] T036 [US1] Implement the 256-byte line editor, strict tokenizer, static command registry, `help`, `version`, `clear`, and deterministic errors in shell/shell.c and shell/commands/core.c
-- [ ] T037 [US1] Wire boot information, memory, exceptions, consoles, input, and shell startup in kernel/init/kernel_main.c
-- [ ] T038 [US1] Package the standard FAT32 UEFI boot image and launch target in cmake/BootImage.cmake and tools/run-qemu.py
+- [x] T031 [P] [US1] Implement isolated Microsoft-x64-to-SysV UEFI ABI trampoline and kernel entry shim in boot/uefi/abi_trampoline.S and arch/x86_64/entry.S
+- [x] T032 [US1] Define reviewed fixed-address ELF64 kernel sections and exported bounds in arch/x86_64/kernel.ld
+- [x] T033 [P] [US1] Implement GDT, IDT, exception stubs, CPU halt/reboot primitives, and assembly boundary comments in arch/x86_64/cpu.c and arch/x86_64/exceptions.S
+- [x] T034 [P] [US1] Implement GOP framebuffer character console and serial fan-out in drivers/console/framebuffer.c and drivers/console/console.c
+- [x] T035 [P] [US1] Implement bounded polling i8042/PS2 keyboard decoding for ASCII, Backspace, and Enter in drivers/input/ps2_keyboard.c
+- [x] T036 [US1] Implement the 256-byte line editor, strict tokenizer, static command registry, `help`, `version`, `clear`, and deterministic errors in shell/shell.c and shell/commands/core.c
+- [x] T037 [US1] Wire boot information, memory, exceptions, consoles, input, and shell startup in kernel/init/kernel_main.c
+- [x] T038 [US1] Package the standard FAT32 UEFI boot image and launch target in cmake/BootImage.cmake and tools/run-qemu.py
 - [ ] T039 [US1] Run and pass the boot/prompt suite including 20 consecutive clean boots via tests/integration/test_boot_prompt.py
 
 **Checkpoint**: US1 is a bootable, interactive, independently demonstrable MVP.
@@ -91,18 +91,18 @@
 
 ### Tests for User Story 2
 
-- [ ] T040 [P] [US2] Add ATA identification, sector I/O, timeout, bounds, status, and flush tests to tests/integration/test_ata_device.py
-- [ ] T041 [P] [US2] Add geometry boundary, overflow, formatter layout, superblock CRC, and FAT initialization tests to tests/unit/test_format_mount.c
-- [ ] T042 [P] [US2] Add VFS mount-state, opaque-handle, and command-boundary contract tests to tests/unit/test_vfs_mount.c
-- [ ] T043 [P] [US2] Add valid, backup-only, differing, corrupt, unsupported, nonzero-reserved-field, unsupported-attribute, cross-linked-chain, and impossible-geometry mount images to tests/corruption/test_superblocks.py
+- [x] T040 [P] [US2] Add ATA identification, sector I/O, timeout, bounds, status, and flush tests to tests/integration/test_ata_device.py
+- [x] T041 [P] [US2] Add geometry boundary, overflow, formatter layout, superblock CRC, and FAT initialization tests to tests/unit/test_format_mount.c
+- [x] T042 [P] [US2] Add VFS mount-state, opaque-handle, and command-boundary contract tests to tests/unit/test_vfs_mount.c
+- [x] T043 [P] [US2] Add valid, backup-only, differing, corrupt, unsupported, nonzero-reserved-field, unsupported-attribute, cross-linked-chain, and impossible-geometry mount images to tests/corruption/test_superblocks.py
 
 ### Implementation for User Story 2
 
-- [ ] T044 [P] [US2] Implement ATA IDENTIFY, bounded LBA28 PIO read/write, error decoding, timeouts, and CACHE FLUSH in drivers/storage/ata_pio/ata_pio.c
-- [ ] T045 [US2] Register the fixed PIIX IDE disk only through the generic block-device API in block/device/device_registry.c
-- [ ] T046 [P] [US2] Implement checked v1 geometry solver and formatter write ordering in fs/inferencefs/format.c
-- [ ] T047 [P] [US2] Implement independent superblock decoding/CRC validation and safe geometry derivation in fs/inferencefs/superblock.c
-- [ ] T048 [US2] Implement the shared read-only FAT walker, typed directory-slot parser, exact companion encode/decode/validation codec, and clean-writable/diagnostic-read-only/rejected full-namespace mount validator with cluster ownership/cross-link detection in fs/inferencefs/fat.c, fs/inferencefs/directory.c, fs/inferencefs/companion.c, fs/inferencefs/validator.c, and fs/inferencefs/mount.c
+- [x] T044 [P] [US2] Implement ATA IDENTIFY, bounded LBA28 PIO read/write, error decoding, timeouts, and CACHE FLUSH in drivers/storage/ata_pio/ata_pio.c
+- [x] T045 [US2] Register the fixed PIIX IDE disk only through the generic block-device API in block/device/device_registry.c
+- [x] T046 [P] [US2] Implement checked v1 geometry solver and formatter write ordering in fs/inferencefs/format.c
+- [x] T047 [P] [US2] Implement independent superblock decoding/CRC validation and safe geometry derivation in fs/inferencefs/superblock.c
+- [x] T048 [US2] Implement the shared read-only FAT walker, typed directory-slot parser, exact companion encode/decode/validation codec, and clean-writable/diagnostic-read-only/rejected full-namespace mount validator with cluster ownership/cross-link detection in fs/inferencefs/fat.c, fs/inferencefs/directory.c, fs/inferencefs/companion.c, fs/inferencefs/validator.c, and fs/inferencefs/mount.c
 - [ ] T049 [US2] Implement single-root lifecycle, InferenceFS operation-table registration, and the minimal correct filesystem-to-cache-to-device `sync`/`unmount` flush path in vfs/vfs.c, fs/inferencefs/vfs_adapter.c, and fs/inferencefs/sync.c
 - [ ] T050 [US2] Implement `devices`, `diskinfo`, `format`, `mount`, `unmount`, `fsinfo`, and `sync` handlers in shell/commands/storage.c
 - [ ] T051 [US2] Run and pass blank-format, valid-mount, full-namespace corruption rejection, minimal sync/unmount failure propagation, fsinfo, and VFS-boundary scenarios in tests/integration/test_format_mount.py

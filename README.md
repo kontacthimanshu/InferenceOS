@@ -1,5 +1,4 @@
 # InferenceOS
-(World's most secure operating system)
 
 # Motivation
 There are just two approaches of doing an operating system from its file system's perspective. Those are as follows:

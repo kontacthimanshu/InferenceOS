@@ -1,0 +1,56 @@
+# Optional repository-local bootstrap products (when paths are overridden)
+.inferenceos-tools/
+.inferenceos-downloads/
+
+# CMake/Ninja build trees and reproducible generated artifacts
+#
+# Presets write to build/<preset>/. Generators and validation tools keep their
+# images, disks, modules, symbols, manifests, logs, screenshots, and benchmark
+# evidence below that preset-owned directory (or build/validation/ for
+# cross-preset evidence). Nothing below build/ is source-controlled.
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+
+# InferenceOS image, firmware, symbol, and coverage products. These patterns
+# also catch generated artifacts accidentally directed outside build/.
+*.elf
+*.efi
+*.fd
+*.img
+*.raw
+*.qcow2
+*.map
+*.sym
+*.d
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# C/C++ build products
+bin/
+obj/
+out/
+*.o
+*.a
+*.so
+*.exe
+*.dll
+*.log
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

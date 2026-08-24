@@ -1,0 +1,175 @@
+name: Clean build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  INFERENCEOS_INSTALL_ROOT: ${{ github.workspace }}/.ci-tools
+  INFERENCEOS_DOWNLOAD_ROOT: ${{ runner.temp }}/inferenceos-downloads
+  INFERENCEOS_BOOTSTRAP_JOBS: "2"
+
+jobs:
+  validate-source:
+    name: Repository boundaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Validate source layout and compiler extensions
+        shell: pwsh
+        run: ./tools/test/validate_source_layout.ps1
+      - name: Validate dependency boundaries
+        shell: pwsh
+        run: ./tools/test/validate_dependencies.ps1
+
+  bootstrap-toolchain:
+    name: Pinned toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Restore pinned tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-tools
+          key: inferenceos-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/bootstrap/versions.json', 'tools/bootstrap/wsl-ubuntu.sh') }}
+      - name: Build missing pinned tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: ./tools/bootstrap/wsl-ubuntu.sh
+      - name: Verify exact tool versions
+        shell: bash
+        run: |
+          source .ci-tools/environment.sh
+          ./tools/bootstrap/wsl-ubuntu.sh --check
+
+  cross-build:
+    name: ${{ matrix.compiler }} ${{ matrix.configuration }}
+    needs:
+      - validate-source
+      - bootstrap-toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            configuration: Debug
+            preset: gcc-debug
+          - compiler: GCC
+            configuration: Release
+            preset: gcc-release
+          - compiler: Clang
+            configuration: Debug
+            preset: clang-debug
+          - compiler: Clang
+            configuration: Release
+            preset: clang-release
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Restore pinned tools
+        uses: actions/cache@v4
+        with:
+          path: .ci-tools
+          key: inferenceos-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/bootstrap/versions.json', 'tools/bootstrap/wsl-ubuntu.sh') }}
+          fail-on-cache-miss: true
+      - name: Verify clean checkout
+        shell: bash
+        run: test ! -e build
+      - name: Configure ${{ matrix.preset }}
+        shell: bash
+        run: |
+          set -o pipefail
+          source .ci-tools/environment.sh
+          mkdir -p ci-logs
+          cmake --preset "${{ matrix.preset }}" 2>&1 | tee "ci-logs/${{ matrix.preset }}-configure.log"
+      - name: Build ${{ matrix.preset }}
+        shell: bash
+        run: |
+          set -o pipefail
+          source .ci-tools/environment.sh
+          cmake --build --preset "${{ matrix.preset }}" --parallel 2 2>&1 | tee "ci-logs/${{ matrix.preset }}-build.log"
+      - name: Retain build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.preset }}-build-evidence
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ci-logs/
+            build/${{ matrix.preset }}/**/*.a
+            build/${{ matrix.preset }}/**/*.elf
+            build/${{ matrix.preset }}/**/*.efi
+            build/${{ matrix.preset }}/compile_commands.json
+
+  hosted-tests:
+    name: ${{ matrix.compiler }} hosted tests
+    needs:
+      - validate-source
+      - bootstrap-toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            build-directory: build/host-gcc
+          - compiler: Clang
+            cc: clang
+            build-directory: build/host-clang
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Restore pinned tools
+        uses: actions/cache@v4
+        with:
+          path: .ci-tools
+          key: inferenceos-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/bootstrap/versions.json', 'tools/bootstrap/wsl-ubuntu.sh') }}
+          fail-on-cache-miss: true
+      - name: Configure native tests
+        shell: bash
+        run: |
+          source .ci-tools/environment.sh
+          cmake -S . -B "${{ matrix.build-directory }}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_ASM_COMPILER=${{ matrix.cc }} \
+            -DINFERENCEOS_BUILD_HOST_TESTS=ON \
+            -DINFERENCEOS_WARNINGS_AS_ERRORS=ON
+      - name: Build native tests
+        shell: bash
+        run: |
+          source .ci-tools/environment.sh
+          cmake --build "${{ matrix.build-directory }}" --parallel 2
+      - name: Run native tests
+        shell: bash
+        run: |
+          source .ci-tools/environment.sh
+          ctest --test-dir "${{ matrix.build-directory }}" --output-on-failure --no-tests=error
+      - name: Retain test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-${{ matrix.cc }}-test-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ matrix.build-directory }}/Testing/Temporary/
+            ${{ matrix.build-directory }}/compile_commands.json

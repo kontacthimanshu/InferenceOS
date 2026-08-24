@@ -1,0 +1,175 @@
+{
+  "version": 10,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 1,
+    "patch": 1
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "INFERENCEOS_WARNINGS_AS_ERRORS": true
+      }
+    },
+    {
+      "name": "gcc-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/x86_64-elf-gcc.cmake"
+    },
+    {
+      "name": "clang-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/x86_64-none-elf-clang.cmake"
+    },
+    {
+      "name": "gcc-debug",
+      "displayName": "GCC cross-toolchain (Debug)",
+      "inherits": "gcc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "gcc-release",
+      "displayName": "GCC cross-toolchain (Release)",
+      "inherits": "gcc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang/LLD cross-toolchain (Debug)",
+      "inherits": "clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "clang-release",
+      "displayName": "Clang/LLD cross-toolchain (Release)",
+      "inherits": "clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "gcc-debug",
+      "configurePreset": "gcc-debug"
+    },
+    {
+      "name": "gcc-release",
+      "configurePreset": "gcc-release"
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug"
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": false,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "gcc-host",
+      "inherits": "test-base",
+      "configurePreset": "gcc-debug",
+      "filter": {
+        "include": {
+          "label": "^(host|unit|property)$"
+        }
+      }
+    },
+    {
+      "name": "clang-host",
+      "inherits": "test-base",
+      "configurePreset": "clang-debug",
+      "filter": {
+        "include": {
+          "label": "^(host|unit|property)$"
+        }
+      }
+    },
+    {
+      "name": "gcc-integration",
+      "inherits": "test-base",
+      "configurePreset": "gcc-debug",
+      "filter": {
+        "include": {
+          "label": "^integration$"
+        }
+      }
+    },
+    {
+      "name": "clang-integration",
+      "inherits": "test-base",
+      "configurePreset": "clang-debug",
+      "filter": {
+        "include": {
+          "label": "^integration$"
+        }
+      }
+    },
+    {
+      "name": "gcc-fault",
+      "inherits": "test-base",
+      "configurePreset": "gcc-debug",
+      "filter": {
+        "include": {
+          "label": "^fault$"
+        }
+      }
+    },
+    {
+      "name": "clang-fault",
+      "inherits": "test-base",
+      "configurePreset": "clang-debug",
+      "filter": {
+        "include": {
+          "label": "^fault$"
+        }
+      }
+    },
+    {
+      "name": "gcc-contract",
+      "inherits": "test-base",
+      "configurePreset": "gcc-debug",
+      "filter": {
+        "include": {
+          "label": "^contract$"
+        }
+      }
+    },
+    {
+      "name": "clang-contract",
+      "inherits": "test-base",
+      "configurePreset": "clang-debug",
+      "filter": {
+        "include": {
+          "label": "^contract$"
+        }
+      }
+    }
+  ]
+}

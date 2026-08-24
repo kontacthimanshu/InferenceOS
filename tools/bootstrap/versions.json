@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "target": "x86_64-elf",
+  "components": {
+    "binutils": {
+      "version": "2.45",
+      "command": "x86_64-elf-as",
+      "source": "https://ftp.gnu.org/gnu/binutils/binutils-2.45.tar.xz"
+    },
+    "gcc": {
+      "version": "16.2.0",
+      "command": "x86_64-elf-gcc",
+      "source": "https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz"
+    },
+    "llvm": {
+      "version": "22.1.8",
+      "commands": ["clang", "ld.lld"],
+      "source": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"
+    },
+    "qemu": {
+      "version": "11.1.0",
+      "command": "qemu-system-x86_64",
+      "source": "https://download.qemu.org/qemu-11.1.0.tar.xz"
+    },
+    "ovmf": {
+      "version": "edk2-stable202605",
+      "source": "https://github.com/tianocore/edk2.git"
+    },
+    "cmake": {
+      "version": "4.1.1",
+      "command": "cmake",
+      "source": "https://github.com/Kitware/CMake/releases/download/v4.1.1/cmake-4.1.1.tar.gz"
+    },
+    "ninja": {
+      "version": "1.13.1",
+      "command": "ninja",
+      "source": "https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.1.tar.gz"
+    }
+  }
+}

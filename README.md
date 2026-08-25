@@ -1,3 +1,5 @@
+Disclaimer: This operating system is based on two of the most prominent operating system approaches called Windows and Linux. There is no intention to infringe on the intellectual properties of both the operating systems.
+
 # InferenceOS
 It is called InferenceOS because only application program can infer the files it operates on.
 

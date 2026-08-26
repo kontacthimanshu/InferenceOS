@@ -42,6 +42,7 @@ function Assert-ZeroSamples([string]$Path) {
 
 $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
 $moduleBuilder = Join-Path $root 'tools/image/build_system_modules.ps1'
+$fontBuilder = Join-Path $root 'tools/image/build_psf2_font.ps1'
 $espBuilder = Join-Path $root 'tools/image/build_esp.ps1'
 $diskBuilder = Join-Path $root 'tools/image/create_persistent_disk.ps1'
 $artifactRoot = if ([string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
@@ -54,12 +55,19 @@ $shell = Join-Path $inputs 'shell.elf'
 $explorer = Join-Path $inputs 'explorer.elf'
 New-StaticElf64 $shell 0x51
 New-StaticElf64 $explorer 0xa7
+$font = Join-Path $inputs 'inferenceos-8x16.psf2'
+$fontC = Join-Path $inputs 'inferenceos-font.c'
+& $fontBuilder -OutputPath $font -CSourcePath $fontC `
+    -LicensePath (Join-Path $root 'assets/fonts/LICENSE.txt')
 $definitionPath = Join-Path $inputs 'modules.json'
 $definition = [ordered]@{
     schema_version = 1
     modules = @(
         [ordered]@{ application_identity = 20; role = 'file_explorer'; required = $false; entry_abi_version = 1; source = 'explorer.elf'; esp_path = '/InferenceOS/System/explorer.elf' },
         [ordered]@{ application_identity = 10; role = 'shell'; required = $true; entry_abi_version = 1; source = 'shell.elf'; esp_path = '/InferenceOS/System/shell.elf' }
+    )
+    assets = @(
+        [ordered]@{ kind = 'psf2_font'; source = 'inferenceos-8x16.psf2'; esp_path = '/InferenceOS/System/inferenceos-8x16.psf2'; license = 'MIT' }
     )
 }
 [System.IO.File]::WriteAllText(
@@ -98,6 +106,23 @@ foreach ($line in $lines[1..2]) {
     if ((Get-FileHash $packaged -Algorithm SHA256).Hash -cne (Get-FileHash $peer -Algorithm SHA256).Hash) {
         throw "Packaged module '$($fields[6])' is not reproducible."
     }
+}
+$firstHashes = Join-Path $firstModules 'InferenceOS/System/modules.sha256'
+$secondHashes = Join-Path $secondModules 'InferenceOS/System/modules.sha256'
+if (-not [System.IO.File]::Exists($firstHashes) -or
+    (Get-FileHash $firstHashes -Algorithm SHA256).Hash -cne
+        (Get-FileHash $secondHashes -Algorithm SHA256).Hash) {
+    throw 'Repeated module packaging did not produce identical system hashes.'
+}
+$hashLines = @(Get-Content -LiteralPath $firstHashes)
+if ($hashLines.Count -ne 5 -or $hashLines[0] -cne 'INFERENCEOS-SYSTEM-HASHES|1' -or
+    -not ($hashLines -match '/InferenceOS/System/inferenceos-8x16[.]psf2$')) {
+    throw 'System hashes do not cover the modules, manifest, and licensed PSF2 font.'
+}
+$packagedFont = Join-Path $firstModules 'InferenceOS/System/inferenceos-8x16.psf2'
+if ((Get-FileHash $packagedFont -Algorithm SHA256).Hash -cne
+    (Get-FileHash $font -Algorithm SHA256).Hash) {
+    throw 'The packaged PSF2 font differs from its generated target asset.'
 }
 
 $loader = Join-Path $inputs 'loader.efi'

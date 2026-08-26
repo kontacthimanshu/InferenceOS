@@ -28,6 +28,10 @@ enum { EFI_LOADER_CODE = 1, EFI_LOADER_DATA = 2 };
 enum { EFI_FILE_MODE_READ = UINT64_C(1), EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL = 1 };
 
 struct efi_guid { ios_u32 data1; ios_u16 data2; ios_u16 data3; ios_u8 data4[8]; };
+struct efi_configuration_table {
+    struct efi_guid vendor_guid;
+    void *vendor_table;
+};
 struct efi_table_header {
     ios_u64 signature;
     ios_u32 revision;
@@ -176,7 +180,7 @@ struct efi_system_table {
     void *runtime_services;
     struct efi_boot_services *boot_services;
     efi_uintn configuration_table_count;
-    void *configuration_table;
+    struct efi_configuration_table *configuration_table;
 };
 
 struct efi_file_info {
@@ -194,5 +198,7 @@ extern const struct efi_guid ios_efi_loaded_image_guid;
 extern const struct efi_guid ios_efi_simple_file_system_guid;
 extern const struct efi_guid ios_efi_file_info_guid;
 extern const struct efi_guid ios_efi_graphics_output_guid;
+extern const struct efi_guid ios_efi_acpi_20_table_guid;
+extern const struct efi_guid ios_efi_acpi_table_guid;
 
 #endif

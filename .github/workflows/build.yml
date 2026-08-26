@@ -102,7 +102,9 @@ jobs:
         run: |
           set -o pipefail
           source .ci-tools/environment.sh
-          cmake --build --preset "${{ matrix.preset }}" --parallel 2 2>&1 | tee "ci-logs/${{ matrix.preset }}-build.log"
+          cmake --build --preset "${{ matrix.preset }}" --parallel 2 \
+            --target inferenceos-image inferenceos-test-disk \
+            2>&1 | tee "ci-logs/${{ matrix.preset }}-build.log"
       - name: Retain build evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -115,6 +117,12 @@ jobs:
             build/${{ matrix.preset }}/**/*.a
             build/${{ matrix.preset }}/**/*.elf
             build/${{ matrix.preset }}/**/*.efi
+            build/${{ matrix.preset }}/**/*.img
+            build/${{ matrix.preset }}/**/*.json
+            build/${{ matrix.preset }}/**/*.manifest
+            build/${{ matrix.preset }}/**/*.sha256
+            build/${{ matrix.preset }}/**/*.map
+            build/${{ matrix.preset }}/**/*.sym
             build/${{ matrix.preset }}/compile_commands.json
 
   hosted-tests:

@@ -1,5 +1,7 @@
 #include <inferenceos/process.h>
 
+#include <inferenceos/arch/gdt.h>
+#include <inferenceos/arch/syscall.h>
 #include <inferenceos/runtime.h>
 
 #define USER_STACK_TOP UINT64_C(0x00007fffffff0000)
@@ -110,12 +112,36 @@ ios_status process_create_from_module(
         0,
         IOS_PROCESS_KERNEL_STACK_PAGES * IOS_PAGE_SIZE
     );
+    memset(&process->user_context, 0, sizeof(process->user_context));
+    process->user_context.rdi = process->application_identity;
+    process->user_context.instruction_pointer = process->entry_point;
+    process->user_context.flags = UINT64_C(0x202);
+    process->user_context.stack_pointer = process->user_stack_pointer;
     *created_process = process;
     return IOS_OK;
 
 fail:
     process_destroy(process);
     return status;
+}
+
+ios_status process_activate(struct ios_process *process)
+{
+    ios_uptr kernel_stack_top;
+
+    if (process == NULL || process->state != IOS_PROCESS_RUNNABLE
+        || process->address_space.root_address == 0 || process->kernel_stack_address == 0
+        || process->kernel_stack_pages == 0
+        || process->kernel_stack_pages > UINT64_MAX / IOS_PAGE_SIZE) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    kernel_stack_top = process->kernel_stack_address
+        + process->kernel_stack_pages * IOS_PAGE_SIZE;
+    kernel_stack_top &= ~UINT64_C(0xf);
+    virtual_address_space_activate(&process->address_space);
+    x86_64_gdt_set_kernel_stack(kernel_stack_top);
+    x86_64_syscall_set_kernel_stack(kernel_stack_top);
+    return IOS_OK;
 }
 
 void process_destroy(struct ios_process *process)

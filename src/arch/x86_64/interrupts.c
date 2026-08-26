@@ -113,3 +113,8 @@ ios_uptr x86_64_interrupt_user_stack(const struct x86_64_interrupt_frame *frame)
     privilege_frame = (const ios_u64 *)(frame + 1);
     return (ios_uptr)*privilege_frame;
 }
+
+void x86_64_halt(void)
+{
+    __asm__ volatile("hlt");
+}

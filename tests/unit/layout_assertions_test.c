@@ -1,4 +1,5 @@
 #include <inferenceos/arch/interrupts.h>
+#include <inferenceos/arch/context.h>
 #include <inferenceos/arch/platform.h>
 #include <inferenceos/base.h>
 #include <inferenceos/boot_info.h>
@@ -6,6 +7,7 @@
 #include <inferenceos/process.h>
 #include <inferenceos/scheduler.h>
 #include <inferenceos/system_module.h>
+#include <inferenceos/syscall.h>
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #error "The foundational layout test requires a supported GCC-compatible compiler"
@@ -16,6 +18,20 @@ IOS_STATIC_ASSERT(CHAR_BIT == 8, "serialized layouts require 8-bit bytes");
 IOS_STATIC_ASSERT(sizeof(void *) == 8, "the x86-64 ABI requires 64-bit pointers");
 
 IOS_STATIC_ASSERT(sizeof(struct x86_64_interrupt_frame) == 160, "interrupt frame size changed");
+IOS_STATIC_ASSERT(sizeof(struct x86_64_user_context) == 144, "user context size changed");
+IOS_STATIC_ASSERT(
+    offsetof(struct x86_64_user_context, instruction_pointer) == 120,
+    "user-context RIP offset must match context assembly"
+);
+IOS_STATIC_ASSERT(
+    offsetof(struct x86_64_user_context, stack_pointer) == 136,
+    "user-context RSP offset must match context assembly"
+);
+IOS_STATIC_ASSERT(sizeof(struct ios_syscall_frame) == 200, "syscall frame size changed");
+IOS_STATIC_ASSERT(
+    offsetof(struct ios_syscall_frame, number) == 144,
+    "syscall number offset must match syscall entry assembly"
+);
 IOS_STATIC_ASSERT(
     offsetof(struct x86_64_interrupt_frame, vector) == 120,
     "interrupt vector offset must match entry assembly"

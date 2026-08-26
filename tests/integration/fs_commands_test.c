@@ -287,7 +287,7 @@ static void test_storage_commands_format_mount_report_unmount_and_remount(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     IOS_TEST_ASSERT_STATUS(initialize_device(&device, &disk), IOS_OK);
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
@@ -321,7 +321,7 @@ static void test_commands_reject_bad_devices_paths_and_unsafe_state(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     IOS_TEST_ASSERT_STATUS(initialize_device(&device, &disk), IOS_OK);
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
@@ -346,7 +346,7 @@ static void test_mount_commands_report_diagnostic_and_rejected_states(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     IOS_TEST_ASSERT_STATUS(initialize_device(&device, &disk), IOS_OK);
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(
@@ -383,7 +383,7 @@ static void test_file_commands_share_provider_and_preserve_quoted_content(void)
     struct ios_cui_command_registry commands;
     struct fake_file_service service = { 0 };
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -411,7 +411,7 @@ static void test_file_commands_validate_arity_and_provider_errors(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     ios_cui_command_registry_initialize(&commands);
@@ -432,7 +432,7 @@ static void test_sync_command_propagates_durable_provider_result(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     ios_status sync_result = IOS_ERROR(IOS_E_IO);
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
@@ -455,7 +455,7 @@ static void test_power_commands_refuse_failed_sync_before_transition(void)
     struct ios_power_controller power;
     struct fake_power_transition transition = { 0 };
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     ios_status sync_result = IOS_ERROR(IOS_E_IO);
 
     vfs_mount_registry_initialize(&mounts);
@@ -488,7 +488,7 @@ static void test_dir_uses_display_safe_entries_and_hides_internal_metadata(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -515,7 +515,7 @@ static void test_dir_rejects_malformed_batch_before_writing_output(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -541,7 +541,7 @@ static void test_directory_navigation_and_mutation_commands_use_shared_provider(
     struct ios_cui_command_registry commands;
     struct fake_directory_service service = { .current = "/", .remove_status = IOS_OK };
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -575,7 +575,7 @@ static void test_directory_commands_validate_arity_and_optional_operations(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -610,7 +610,7 @@ static void test_privileged_diagnostic_commands_render_authoritative_dtos(void)
     struct ios_fs_diagnostic_service diagnostic;
     struct diagnostic_fixture fixture;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     ios_handle authority_handle;
     memset(&filesystem, 0, sizeof(filesystem));
     memset(&process, 0, sizeof(process));
@@ -671,7 +671,7 @@ static void test_internal_diagnostics_require_an_explicit_binding(void)
     struct ios_cui_fs_context context;
     struct ios_cui_command_registry commands;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture, &output, &context, NULL };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
     vfs_mount_registry_initialize(&mounts);
     IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
     ios_cui_command_registry_initialize(&commands);

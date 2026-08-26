@@ -1,4 +1,5 @@
 #include <inferenceos/fault_injector.h>
+#include <inferenceos/fs/registry.h>
 #include <inferenceos/fs/transaction.h>
 #include <inferenceos/test.h>
 
@@ -174,7 +175,10 @@ static ios_status transaction_barrier(void *context)
     return persist_barrier(harness, stages[harness->barrier_count++]);
 }
 
-static ios_status durable_create_report(struct commit_harness *harness)
+static ios_status durable_create_report_with_registry(
+    struct commit_harness *harness,
+    struct ios_fs_registry *registry
+)
 {
     static const uint8_t content[CONTENT_SIZE] = {
         'p', 'e', 'r', 's', 'i', 's', 't', 'e', 'n', 't', ' ', 'd', 'a', 't', 'a'
@@ -192,10 +196,21 @@ static ios_status durable_create_report(struct commit_harness *harness)
     ios_status status = ios_fs_transaction_initialize(
         &transaction, harness, &operations, true
     );
-    return IOS_FAILED(status) ? status
-                              : ios_fs_transaction_create(
-                                    &transaction, &primary, content, sizeof(content)
-                                );
+    if (IOS_FAILED(status)) return status;
+    if (registry != NULL) {
+        status = ios_fs_transaction_attach_registry(
+            &transaction, registry, UINT32_C(8), UINT16_C(10)
+        );
+        if (IOS_FAILED(status)) return status;
+    }
+    return ios_fs_transaction_create(
+        &transaction, &primary, content, sizeof(content)
+    );
+}
+
+static ios_status durable_create_report(struct commit_harness *harness)
+{
+    return durable_create_report_with_registry(harness, NULL);
 }
 
 static bool all_zero(const uint8_t *bytes, size_t length)
@@ -339,11 +354,121 @@ static void test_reboot_discards_unflushed_primary_and_committed_companion(void)
     IOS_TEST_ASSERT(inspect_durable_image(&harness.image) == PERSISTED_INCOMPLETE);
 }
 
+static void test_registry_refresh_follows_authoritative_commit(void)
+{
+    struct commit_harness harness;
+    struct ios_fs_registry registry;
+    struct ios_fs_registry_record_disk storage[2];
+    struct ios_fs_registry_record record;
+    ios_size record_index;
+
+    initialize_harness(&harness);
+    memset(storage, 0, sizeof(storage));
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_initialize(&registry, storage, 2, true), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        durable_create_report_with_registry(&harness, &registry), IOS_OK
+    );
+    IOS_TEST_ASSERT(inspect_durable_image(&harness.image) == PERSISTED_HEALTHY);
+    IOS_TEST_ASSERT(ios_fs_registry_active_count(&registry) == 1);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_find(
+            &registry, (const ios_u8 *)"TXT", 3, &record_index, &record
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT(record.last_directory_cluster == UINT32_C(8));
+    IOS_TEST_ASSERT(record.last_directory_slot == UINT16_C(10));
+    IOS_TEST_ASSERT(record.update_generation == UINT16_C(1));
+
+    initialize_harness(&harness);
+    memset(storage, 0, sizeof(storage));
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_initialize(&registry, storage, 2, true), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        fault_injector_fail_once(
+            &harness.faults, IOS_FAULT_BLOCK_FLUSH, 4, IOS_ERROR(IOS_E_IO)
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        durable_create_report_with_registry(&harness, &registry),
+        IOS_ERROR(IOS_E_IO)
+    );
+    IOS_TEST_ASSERT(ios_fs_registry_active_count(&registry) == 0);
+}
+
+static void test_registry_failure_does_not_fail_authoritative_commit(void)
+{
+    struct commit_harness harness;
+    struct ios_fs_registry registry;
+    struct ios_fs_registry_record_disk storage[1];
+    struct ios_fs_registry_record_disk snapshot;
+    struct ios_fs_primary source = {
+        { 'E', 'V', 'E', 'N', 'T', ' ', ' ', ' ', 'L', 'O', 'G' },
+        IOS_FS_ATTRIBUTE_REGULAR, 0, 0
+    };
+    struct ios_fs_primary_disk source_disk;
+    struct ios_fs_companion_disk companion;
+    ios_size record_index;
+
+    initialize_harness(&harness);
+    memset(storage, 0, sizeof(storage));
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_initialize(&registry, storage, 1, true), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(ios_fs_primary_encode(&source, &source_disk), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_companion_encode(source.name, true, &companion), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_refresh(
+            &registry, &companion, &source_disk, UINT32_C(9), UINT16_C(3),
+            &record_index
+        ),
+        IOS_OK
+    );
+    snapshot = storage[0];
+
+    IOS_TEST_ASSERT_STATUS(
+        durable_create_report_with_registry(&harness, &registry), IOS_OK
+    );
+    IOS_TEST_ASSERT(inspect_durable_image(&harness.image) == PERSISTED_HEALTHY);
+    IOS_TEST_ASSERT(ios_fs_registry_health(&registry) == IOS_FS_REGISTRY_FULL);
+    IOS_TEST_ASSERT(memcmp(&snapshot, &storage[0], sizeof(snapshot)) == 0);
+}
+
+static void test_disabled_registry_is_not_mutated(void)
+{
+    struct commit_harness harness;
+    struct ios_fs_registry registry;
+    struct ios_fs_registry_record_disk storage[2];
+    struct ios_fs_registry_record_disk snapshot[2];
+
+    initialize_harness(&harness);
+    memset(storage, 0xa5, sizeof(storage));
+    memcpy(snapshot, storage, sizeof(storage));
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_registry_initialize(&registry, storage, 2, false), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        durable_create_report_with_registry(&harness, &registry), IOS_OK
+    );
+    IOS_TEST_ASSERT(inspect_durable_image(&harness.image) == PERSISTED_HEALTHY);
+    IOS_TEST_ASSERT(ios_fs_registry_health(&registry) == IOS_FS_REGISTRY_DISABLED);
+    IOS_TEST_ASSERT(memcmp(snapshot, storage, sizeof(storage)) == 0);
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_success_uses_exact_order_and_persists_inspectable_pair),
     IOS_TEST_CASE(test_every_semantic_persistence_failure_is_safe_and_reported),
     IOS_TEST_CASE(test_every_physical_write_failure_is_safe_and_reported),
     IOS_TEST_CASE(test_every_flush_failure_prevents_false_durable_success),
-    IOS_TEST_CASE(test_reboot_discards_unflushed_primary_and_committed_companion)
+    IOS_TEST_CASE(test_reboot_discards_unflushed_primary_and_committed_companion),
+    IOS_TEST_CASE(test_registry_refresh_follows_authoritative_commit),
+    IOS_TEST_CASE(test_registry_failure_does_not_fail_authoritative_commit),
+    IOS_TEST_CASE(test_disabled_registry_is_not_mutated)
 };
 const size_t ios_test_case_count = COMMIT_ARRAY_COUNT(ios_test_cases);

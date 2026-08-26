@@ -85,6 +85,7 @@ ios_status ios_terminal_start(
     const struct ios_psf2_font *font,
     struct ios_cui_command_registry *registry,
     void *command_context,
+    void *shell_context,
     ios_i32 x,
     ios_i32 y
 )
@@ -108,7 +109,13 @@ ios_status ios_terminal_start(
     }, terminal->background);
     status = ios_window_create(window_manager, surface, x, y, 1, &terminal->window);
     if (IOS_FAILED(status)) return status;
-    io = (struct ios_cui_io){ terminal_write, terminal, command_context, NULL };
+    io = (struct ios_cui_io){
+        .write = terminal_write,
+        .write_context = terminal,
+        .command_context = command_context,
+        .registry = NULL,
+        .shell_context = shell_context
+    };
     status = ios_cui_console_initialize(&terminal->console, registry, io);
     if (IOS_FAILED(status)) {
         (void)ios_window_destroy(window_manager, terminal->window);

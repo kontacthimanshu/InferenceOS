@@ -61,7 +61,8 @@ function New-TestCase(
     [string]$TerminalMarker,
     [string[]]$OrderedMarkers,
     [string[]]$ForbiddenMarkers,
-    [string[]]$ExtraQemuArguments
+    [string]$TestAction,
+    [string]$TestArgument
 ) {
     [pscustomobject][ordered]@{
         Name = $Name
@@ -69,7 +70,8 @@ function New-TestCase(
         TerminalMarker = $TerminalMarker
         OrderedMarkers = $OrderedMarkers
         ForbiddenMarkers = $ForbiddenMarkers
-        ExtraQemuArguments = $ExtraQemuArguments
+        TestAction = $TestAction
+        TestArgument = $TestArgument
     }
 }
 
@@ -132,7 +134,8 @@ for ($index = 1; $index -le $RunCount; ++$index) {
         -TerminalMarker $markers.CuiReady `
         -OrderedMarkers @($markers.EarlySerialReady, $markers.CuiReady) `
         -ForbiddenMarkers @($markers.GuiUnavailable) `
-        -ExtraQemuArguments @()))
+        -TestAction $null `
+        -TestArgument $null))
 }
 for ($index = 1; $index -le $RunCount; ++$index) {
     $cases.Add((New-TestCase `
@@ -141,7 +144,8 @@ for ($index = 1; $index -le $RunCount; ++$index) {
         -TerminalMarker $markers.GuiReady `
         -OrderedMarkers @($markers.EarlySerialReady, $markers.CuiReady, $markers.GuiReady) `
         -ForbiddenMarkers @($markers.GuiUnavailable) `
-        -ExtraQemuArguments @('-fw_cfg', 'name=opt/inferenceos/test_action,string=start_gui')))
+        -TestAction 'start_gui' `
+        -TestArgument $null))
 }
 foreach ($fault in @('framebuffer', 'font', 'pointer')) {
     $cases.Add((New-TestCase `
@@ -155,10 +159,8 @@ foreach ($fault in @('framebuffer', 'font', 'pointer')) {
             $markers.CuiRecoveryReady
         ) `
         -ForbiddenMarkers @($markers.GuiReady) `
-        -ExtraQemuArguments @(
-            '-fw_cfg', 'name=opt/inferenceos/test_action,string=start_gui',
-            '-fw_cfg', "name=opt/inferenceos/gui_fault,string=$fault"
-        )))
+        -TestAction 'gui_recovery' `
+        -TestArgument $fault))
 }
 
 $plan = [ordered]@{
@@ -215,11 +217,11 @@ try {
         foreach ($marker in $case.ForbiddenMarkers) {
             $arguments.AddRange([string[]]@('-ForbiddenMarker', $marker))
         }
-        if ($case.ExtraQemuArguments.Count -gt 0) {
-            $arguments.AddRange([string[]]@(
-                '-ExtraQemuArgumentJson',
-                (ConvertTo-Json -Compress -InputObject ([string[]]$case.ExtraQemuArguments))
-            ))
+        if (-not [string]::IsNullOrWhiteSpace($case.TestAction)) {
+            $arguments.AddRange([string[]]@('-TestAction', $case.TestAction))
+            if (-not [string]::IsNullOrWhiteSpace($case.TestArgument)) {
+                $arguments.AddRange([string[]]@('-TestArgument', $case.TestArgument))
+            }
         }
 
         $runnerResult = Invoke-RunnerProcess ([string[]]$arguments)

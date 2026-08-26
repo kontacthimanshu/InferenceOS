@@ -15,6 +15,8 @@ enum {
     X86_64_SYSRET_SELECTOR_BASE = 0x13
 };
 
+extern ios_uptr x86_64_syscall_kernel_stack;
+
 static void cpuid(ios_u32 leaf, ios_u32 *eax, ios_u32 *ebx, ios_u32 *ecx, ios_u32 *edx)
 {
     __asm__ volatile(
@@ -68,4 +70,11 @@ ios_status x86_64_syscall_configure(ios_uptr entry_point)
     write_msr(X86_64_MSR_FMASK, flags_to_clear);
     write_msr(X86_64_MSR_EFER, efer);
     return IOS_OK;
+}
+
+void x86_64_syscall_set_kernel_stack(ios_uptr stack_pointer)
+{
+    IOS_ASSERT(stack_pointer != 0);
+    IOS_ASSERT((stack_pointer & UINT64_C(0xf)) == 0);
+    x86_64_syscall_kernel_stack = stack_pointer;
 }

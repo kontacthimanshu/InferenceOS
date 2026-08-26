@@ -1,0 +1,10 @@
+InferenceOS 8x16 Bitmap Font
+
+Copyright (c) 2026 InferenceOS contributors
+
+This project-authored bitmap font and its generated PSF2 representation are
+licensed under the MIT License. The full license text is available at the
+repository root in LICENSE.
+
+The glyphs are deliberately simple 5x7 designs expanded into an 8x16 cell by
+tools/image/build_psf2_font.ps1. No host font or external binary asset is used.

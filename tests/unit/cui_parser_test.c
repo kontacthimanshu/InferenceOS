@@ -84,7 +84,7 @@ static void test_shared_registry_dispatches_identically(void)
     struct output_buffer output = { 0 };
     ios_size standalone_count = 0;
     ios_size terminal_count = 0;
-    struct ios_cui_io io = { capture_output, &output, &standalone_count, NULL };
+    struct ios_cui_io io = { capture_output, &output, &standalone_count, NULL, NULL };
     ios_cui_command_registry_initialize(&registry);
     IOS_TEST_ASSERT_STATUS(ios_cui_command_register(&registry, &write_command), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
@@ -107,7 +107,7 @@ static void test_console_edits_reports_errors_and_recovers_prompt(void)
     struct ios_cui_command_registry registry;
     struct ios_cui_console console;
     struct output_buffer output = { 0 };
-    struct ios_cui_io io = { capture_output, &output, NULL, NULL };
+    struct ios_cui_io io = { capture_output, &output, NULL, NULL, NULL };
     ios_cui_command_registry_initialize(&registry);
     IOS_TEST_ASSERT_STATUS(ios_cui_register_core_commands(&registry), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_initialize(&console, &registry, io), IOS_OK);

@@ -14,6 +14,9 @@ param(
     [switch]$SkipVersionCheck,
     [switch]$DryRun,
     [switch]$ReleaseMatrix,
+    [string]$TestAction,
+    [string]$TestArgument,
+    [ValidateRange(1, 4294967295)][uint32]$TestSequence = 1,
     [string[]]$ExtraQemuArgument = @(),
     [string]$ExtraQemuArgumentJson
 )
@@ -72,6 +75,39 @@ function Read-AvailableText([string]$Path) {
         } finally { $stream.Dispose() }
     } catch {
         return ''
+    }
+}
+
+function Get-FreeTcpPort {
+    $listener = [System.Net.Sockets.TcpListener]::new(
+        [System.Net.IPAddress]::Loopback, 0
+    )
+    try {
+        $listener.Start()
+        return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    } finally {
+        $listener.Stop()
+    }
+}
+
+function Send-TestControlRequest(
+    [int]$Port, [uint32]$Sequence, [string]$Action, [string]$Argument
+) {
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) {
+            throw "Timed out connecting to the q35 COM2 test-control port $Port."
+        }
+        $client.EndConnect($pending)
+        $line = "INFERENCEOS_TEST 1 $Sequence $Action"
+        if (-not [string]::IsNullOrWhiteSpace($Argument)) { $line += " $Argument" }
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($line + "`n")
+        $stream = $client.GetStream()
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush()
+    } finally {
+        $client.Dispose()
     }
 }
 
@@ -143,7 +179,9 @@ function Invoke-ReleaseMatrix {
         [ordered]@{ Name = 'format-mount'; Script = 'format_mount_test.ps1'; Timeout = 120; Arguments = @() },
         [ordered]@{ Name = 'file-explorer'; Script = 'file_explorer_test.ps1'; Timeout = 60; Arguments = @() },
         [ordered]@{ Name = 'reboot-persistence'; Script = 'reboot_persistence_test.ps1'; Timeout = 120; Arguments = @('-CycleCount', '20') },
-        [ordered]@{ Name = 'directory-interop'; Script = 'directory_interop_test.ps1'; Timeout = 120; Arguments = @() }
+        [ordered]@{ Name = 'directory-interop'; Script = 'directory_interop_test.ps1'; Timeout = 120; Arguments = @() },
+        [ordered]@{ Name = 'fault-matrix'; Script = 'fault_matrix_test.ps1'; Timeout = 120; Arguments = @() },
+        [ordered]@{ Name = 'registry-benchmark'; Script = 'registry_benchmark_qemu_test.ps1'; Timeout = 120; Arguments = @() }
     )
     $results = [System.Collections.Generic.List[object]]::new()
     $matrixPassed = $true
@@ -247,8 +285,25 @@ if ($RequiredMarker.Count -eq 0 -or ($RequiredMarker | Where-Object { [string]::
 if ($ForbiddenMarker | Where-Object { [string]::IsNullOrWhiteSpace($_) }) {
     throw 'Forbidden markers must be nonempty.'
 }
+if (-not [string]::IsNullOrWhiteSpace($TestAction) -and
+    $TestAction -notmatch '^[a-z][a-z0-9_]{0,46}$') {
+    throw 'TestAction must be a lowercase protocol action token of at most 47 characters.'
+}
+if (-not [string]::IsNullOrEmpty($TestArgument) -and
+    ($TestArgument.Length -ge 160 -or $TestArgument -match '[\r\n]')) {
+    throw 'TestArgument must fit the bounded one-line protocol payload.'
+}
 $allForbiddenMarkers = @($PanicMarkers + $ForbiddenMarker | Select-Object -Unique)
-foreach ($marker in $RequiredMarker) {
+if (-not [string]::IsNullOrWhiteSpace($TestAction)) {
+    $allForbiddenMarkers = @($allForbiddenMarkers + 'INFERENCEOS:TEST_CONTROL_FAIL' |
+        Select-Object -Unique)
+}
+$testPassMarker = if ([string]::IsNullOrWhiteSpace($TestAction)) { $null } else {
+    "INFERENCEOS:TEST_CONTROL_PASS version=1 sequence=$TestSequence action=$TestAction"
+}
+$effectiveRequiredMarkers = @($RequiredMarker)
+if ($null -ne $testPassMarker) { $effectiveRequiredMarkers += $testPassMarker }
+foreach ($marker in $effectiveRequiredMarkers) {
     if ($marker -in $allForbiddenMarkers) { throw "Marker '$marker' cannot be both required and forbidden." }
 }
 
@@ -267,6 +322,7 @@ $qemuStdout = Join-Path $runDirectory 'qemu.stdout.log'
 $qemuStderr = Join-Path $runDirectory 'qemu.stderr.log'
 $launchManifest = Join-Path $runDirectory 'launch.json'
 $resultManifest = Join-Path $runDirectory 'result.json'
+$testControlPort = if ([string]::IsNullOrWhiteSpace($TestAction)) { 0 } else { Get-FreeTcpPort }
 
 $launcherParameters = @{
     EspPath = $EspPath
@@ -278,6 +334,7 @@ $launcherParameters = @{
     SerialLogPath = $serialLog
     Headless = $true
     DryRun = $true
+    TestControlPort = $testControlPort
     ExtraQemuArgument = $ExtraQemuArgument
 }
 if ($SkipVersionCheck) { $launcherParameters.SkipVersionCheck = $true }
@@ -287,8 +344,16 @@ $launchRecord = [ordered]@{
     RunName = $RunName
     StartedUtc = [DateTime]::UtcNow.ToString('o')
     TimeoutSeconds = $TimeoutSeconds
-    RequiredMarkers = $RequiredMarker
+    RequiredMarkers = $effectiveRequiredMarkers
     ForbiddenMarkers = $allForbiddenMarkers
+    TestControlRequest = if ($testControlPort -eq 0) { $null } else {
+        [ordered]@{
+            ProtocolVersion = 1
+            Sequence = $TestSequence
+            Action = $TestAction
+            Argument = $TestArgument
+        }
+    }
     Profile = $profile
 }
 Write-Utf8NoBom $launchManifest (($launchRecord | ConvertTo-Json -Depth 8) + "`n")
@@ -306,17 +371,22 @@ $timedOut = $false
 $failure = $null
 $matchedMarkers = [System.Collections.Generic.List[string]]::new()
 $started = [DateTime]::UtcNow
+$testRequestSent = $false
 try {
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $profile.QemuPath
+    $startInfo.FileName = $profile.QemuExecutionPath
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     if ($null -ne $startInfo.PSObject.Properties['ArgumentList']) {
-        foreach ($argument in $profile.Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+        foreach ($argument in @($profile.QemuExecutionPrefix) + @($profile.Arguments)) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
     } else {
-        $startInfo.Arguments = Convert-ToNativeArgumentString $profile.Arguments
+        $startInfo.Arguments = Convert-ToNativeArgumentString (
+            @($profile.QemuExecutionPrefix) + @($profile.Arguments)
+        )
     }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -327,14 +397,19 @@ try {
 
     while ([DateTime]::UtcNow -lt $deadline) {
         $transcript = Read-AvailableText $serialLog
+        if (-not $testRequestSent -and $testControlPort -ne 0 -and
+            $transcript.Contains('INFERENCEOS:TEST_CONTROL_READY version=1')) {
+            Send-TestControlRequest $testControlPort $TestSequence $TestAction $TestArgument
+            $testRequestSent = $true
+        }
         foreach ($marker in $allForbiddenMarkers) {
             if ($transcript.Contains($marker)) { throw "Forbidden serial marker observed: $marker" }
         }
         $matchedMarkers.Clear()
-        foreach ($marker in $RequiredMarker) {
+        foreach ($marker in $effectiveRequiredMarkers) {
             if ($transcript.Contains($marker)) { $matchedMarkers.Add($marker) }
         }
-        if ($matchedMarkers.Count -eq $RequiredMarker.Count) { $passed = $true; break }
+        if ($matchedMarkers.Count -eq $effectiveRequiredMarkers.Count) { $passed = $true; break }
         if ($process.HasExited) {
             throw "QEMU exited with code $($process.ExitCode) before required markers appeared."
         }
@@ -367,6 +442,7 @@ try {
         FinishedUtc = [DateTime]::UtcNow.ToString('o')
         DurationMilliseconds = [Math]::Round(([DateTime]::UtcNow - $started).TotalMilliseconds)
         MatchedMarkers = [string[]]$matchedMarkers
+        TestControlRequestSent = $testRequestSent
         SerialLog = $serialLog
         QemuStandardOutput = $qemuStdout
         QemuStandardError = $qemuStderr

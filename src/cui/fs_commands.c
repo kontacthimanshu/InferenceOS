@@ -133,6 +133,15 @@ static ios_status mount_command(
         }
         return status;
     }
+    if (context->mount_ready != NULL) {
+        status = context->mount_ready(
+            context->mount_ready_context, context->filesystem_mount
+        );
+        if (IOS_FAILED(status)) {
+            (void)vfs_unmount_root(context->mount_registry);
+            return status;
+        }
+    }
     io->write("mounted disk", io->write_context); write_u64(io, index);
     io->write(" at / state=", io->write_context);
     io->write(mount_state(context->filesystem_mount->vfs.state), io->write_context);
@@ -309,6 +318,18 @@ ios_status ios_cui_fs_set_power_controller(
 {
     if (context == NULL || power == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     context->power = power;
+    return IOS_OK;
+}
+ios_status ios_cui_fs_set_mount_ready_operation(
+    struct ios_cui_fs_context *context,
+    void *mount_ready_context,
+    ios_status (*mount_ready)(void *context, struct ios_fs_mount *mount))
+{
+    if (context == NULL || mount_ready_context == NULL || mount_ready == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    context->mount_ready_context = mount_ready_context;
+    context->mount_ready = mount_ready;
     return IOS_OK;
 }
 ios_status ios_cui_register_fs_commands(struct ios_cui_command_registry *registry)

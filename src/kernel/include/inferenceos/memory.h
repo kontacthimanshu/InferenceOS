@@ -65,6 +65,7 @@ struct ios_address_space {
 };
 
 ios_status virtual_memory_initialize(void);
+void virtual_kernel_address_space_activate(void);
 bool virtual_address_is_canonical(ios_uptr address);
 bool virtual_user_range_is_valid(ios_uptr address, ios_u64 byte_count);
 ios_status virtual_address_space_create(struct ios_address_space *address_space);

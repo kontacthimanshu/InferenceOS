@@ -109,7 +109,7 @@ foreach ($relativePath in $files) {
 
     Test-ForbiddenPattern $relativePath $content 'EXT004' '\b(?:typeof|__typeof__?)\s*\(' 'GNU typeof is not allowlisted.'
     Test-ForbiddenPattern $relativePath $content 'EXT005' '\(\s*\{' 'GNU statement expressions are not allowlisted.'
-    Test-ForbiddenPattern $relativePath $content 'EXT006' '\[[ \t]*0[ \t]*\](?=[ \t]*(?:[,;)]|$))' 'Zero-length arrays are not allowlisted.'
+    Test-ForbiddenPattern $relativePath $content 'EXT006' '\[[ \t]*0[ \t]*\][ \t]*;' 'Zero-length arrays are not allowlisted.'
     Test-ForbiddenPattern $relativePath $content 'EXT007' '\bcase\s+[^:\r\n]+\.\.\.[^:\r\n]+:' 'GNU case ranges are not allowlisted.'
     Test-ForbiddenPattern $relativePath $content 'EXT008' '\bgoto\s+\*|&&[A-Za-z_][A-Za-z0-9_]*' 'Computed goto is not allowlisted.'
     Test-ForbiddenPattern $relativePath $content 'EXT009' '\b__(?:atomic|sync)_[A-Za-z0-9_]+' 'Compiler-specific atomic builtins are not allowlisted.'

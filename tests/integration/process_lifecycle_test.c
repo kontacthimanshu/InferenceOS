@@ -4,6 +4,7 @@
 #include <inferenceos/arch/platform.h>
 #include <inferenceos/process.h>
 #include <inferenceos/scheduler.h>
+#include <inferenceos/syscall.h>
 
 #include <string.h>
 
@@ -46,6 +47,94 @@ ios_status x86_64_acpi_discover(
 
 void x86_64_pic_mask_and_remap(void)
 {
+}
+
+bool x86_64_interrupt_from_user(const struct x86_64_interrupt_frame *frame)
+{
+    return frame != NULL && (frame->cs & UINT64_C(3)) == UINT64_C(3);
+}
+
+ios_uptr x86_64_interrupt_user_stack(const struct x86_64_interrupt_frame *frame)
+{
+    const ios_u64 *privilege_frame = (const ios_u64 *)(frame + 1);
+    IOS_TEST_ASSERT(x86_64_interrupt_from_user(frame));
+    return (ios_uptr)privilege_frame[0];
+}
+
+bool virtual_user_range_is_valid(ios_uptr address, ios_u64 byte_count)
+{
+    return byte_count != 0 && address >= UINT64_C(0x0000010000000000)
+        && address < UINT64_C(0x0000800000000000)
+        && byte_count <= UINT64_MAX - address
+        && address + byte_count <= UINT64_C(0x0000800000000000);
+}
+
+void virtual_kernel_address_space_activate(void)
+{
+}
+
+void virtual_address_space_activate(const struct ios_address_space *address_space)
+{
+    IOS_TEST_ASSERT(address_space != NULL && address_space->root_address != 0);
+}
+
+void x86_64_gdt_set_kernel_stack(ios_uptr stack_pointer)
+{
+    IOS_TEST_ASSERT(stack_pointer != 0 && (stack_pointer & UINT64_C(0xf)) == 0);
+}
+
+void x86_64_syscall_set_kernel_stack(ios_uptr stack_pointer)
+{
+    IOS_TEST_ASSERT(stack_pointer != 0 && (stack_pointer & UINT64_C(0xf)) == 0);
+}
+
+ios_status x86_64_syscall_configure(ios_uptr entry_point)
+{
+    IOS_TEST_ASSERT(entry_point != 0);
+    return IOS_OK;
+}
+
+void x86_64_syscall_entry(void)
+{
+}
+
+ios_status syscall_ipc_register(void)
+{
+    return IOS_OK;
+}
+
+ios_status user_copy_to(
+    const struct ios_process *process,
+    ios_uptr user_destination,
+    const void *kernel_source,
+    ios_size byte_count
+)
+{
+    (void)process;
+    (void)user_destination;
+    (void)kernel_source;
+    (void)byte_count;
+    return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+}
+
+ios_status user_copy_from(
+    const struct ios_process *process,
+    void *kernel_destination,
+    ios_uptr user_source,
+    ios_size byte_count
+)
+{
+    (void)process;
+    (void)kernel_destination;
+    (void)user_source;
+    (void)byte_count;
+    return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+}
+
+_Noreturn void x86_64_restore_user_context(const struct x86_64_user_context *context)
+{
+    (void)context;
+    ios_test_fail("unexpected user-context restore", __FILE__, __LINE__);
 }
 
 ios_status x86_64_apic_timer_initialize(const struct x86_64_platform_info *platform)
@@ -181,6 +270,9 @@ static void initialize_process(struct ios_process *process)
     process->kernel_stack_address = (ios_uptr)UINT64_C(0x200000);
     process->kernel_stack_pages = IOS_PROCESS_KERNEL_STACK_PAGES;
     process->address_space.root_address = (ios_uptr)UINT64_C(0x300000);
+    process->user_context.instruction_pointer = UINT64_C(0x0000010000100000);
+    process->user_context.stack_pointer = UINT64_C(0x00007ffffffe0000);
+    process->user_context.flags = UINT64_C(0x202);
     IOS_TEST_ASSERT_STATUS(handle_table_initialize(&process->handles, process->process_id), IOS_OK);
     IOS_TEST_ASSERT_STATUS(handle_table_insert(
         &process->handles,
@@ -216,8 +308,15 @@ static void test_exit_releases_resources_and_records_collectible_status(void)
     IOS_TEST_ASSERT(scheduler_select_next()->process == &process);
     IOS_TEST_ASSERT_STATUS(scheduler_exit_current(-37), IOS_OK);
 
-    IOS_TEST_ASSERT(process.state == IOS_PROCESS_EXITED);
+    IOS_TEST_ASSERT(process.state == IOS_PROCESS_RUNNABLE);
     IOS_TEST_ASSERT(process.exit_status == -37);
+    IOS_TEST_ASSERT(handle_table_open_count(&process.handles) == 1);
+    IOS_TEST_ASSERT(freed_stack_count == 0);
+    IOS_TEST_ASSERT(scheduler_current_task()->kind == IOS_TASK_IDLE);
+
+    scheduler_finish_switch();
+
+    IOS_TEST_ASSERT(process.state == IOS_PROCESS_EXITED);
     IOS_TEST_ASSERT(handle_table_open_count(&process.handles) == 0);
     IOS_TEST_ASSERT(release_count == 1);
     IOS_TEST_ASSERT(freed_stack_count == 1);
@@ -226,8 +325,6 @@ static void test_exit_releases_resources_and_records_collectible_status(void)
     IOS_TEST_ASSERT(process.kernel_stack_address == 0);
     IOS_TEST_ASSERT(destroyed_address_space_count == 1);
     IOS_TEST_ASSERT(process.address_space.root_address == 0);
-    IOS_TEST_ASSERT(scheduler_current_task()->kind == IOS_TASK_IDLE);
-
     IOS_TEST_ASSERT_STATUS(process_collect(&process, &status), IOS_OK);
     IOS_TEST_ASSERT(status == -37);
     IOS_TEST_ASSERT(process.state == IOS_PROCESS_UNUSED);
@@ -254,6 +351,37 @@ static void test_blocked_wait_is_cancelled_before_exit(void)
     IOS_TEST_ASSERT_STATUS(scheduler_exit_current(0), IOS_OK);
     IOS_TEST_ASSERT(blocked->wait_queue == NULL);
     IOS_TEST_ASSERT(queue.head == NULL && queue.tail == NULL);
+    scheduler_finish_switch();
+    IOS_TEST_ASSERT(process.state == IOS_PROCESS_EXITED);
+}
+
+static void test_exit_syscall_switches_off_process_before_teardown(void)
+{
+    struct ios_process process;
+    struct ios_syscall_frame frame = { 0 };
+    ios_u32 idle_calls = 0;
+
+    reset_observations();
+    initialize_process(&process);
+    IOS_TEST_ASSERT_STATUS(scheduler_initialize(idle, &idle_calls), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(scheduler_add_process(&process), IOS_OK);
+    IOS_TEST_ASSERT(scheduler_select_next()->process == &process);
+    syscall_dispatch_initialize();
+
+    frame.context = process.user_context;
+    frame.number = IOS_SYSCALL_PROCESS_EXIT;
+    frame.arguments[0] = (ios_u64)(ios_i64)-73;
+    IOS_TEST_ASSERT(syscall_dispatch_frame(&frame) == NULL);
+
+    IOS_TEST_ASSERT(scheduler_current_task()->kind == IOS_TASK_IDLE);
+    IOS_TEST_ASSERT(process.state == IOS_PROCESS_RUNNABLE);
+    IOS_TEST_ASSERT(process.exit_status == -73);
+    IOS_TEST_ASSERT(freed_stack_count == 0);
+
+    scheduler_finish_switch();
+    IOS_TEST_ASSERT(process.state == IOS_PROCESS_EXITED);
+    IOS_TEST_ASSERT(freed_stack_count == 1);
+    IOS_TEST_ASSERT(destroyed_address_space_count == 1);
 }
 
 static void test_unexited_process_cannot_be_collected(void)
@@ -269,6 +397,7 @@ static void test_unexited_process_cannot_be_collected(void)
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_exit_releases_resources_and_records_collectible_status),
     IOS_TEST_CASE(test_blocked_wait_is_cancelled_before_exit),
+    IOS_TEST_CASE(test_exit_syscall_switches_off_process_before_teardown),
     IOS_TEST_CASE(test_unexited_process_cannot_be_collected)
 };
 

@@ -21,6 +21,25 @@ struct test_observation {
     ios_u32 stops[4];
     ios_size stop_count;
     ios_u32 fail_role;
+    ios_size command_calls;
+};
+
+static ios_status service_command(
+    ios_size argument_count, const char *const *arguments, struct ios_cui_io *io
+)
+{
+    struct test_observation *observation = io->command_context;
+
+    (void)arguments;
+    if (argument_count != 1 || observation == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    ++observation->command_calls;
+    return IOS_OK;
+}
+
+static const struct ios_cui_command service_descriptor = {
+    "service", "exercise the shared command context", service_command
 };
 
 static void write_u32(ios_u8 *bytes, ios_u32 value)
@@ -95,6 +114,7 @@ static struct ios_shell_config make_config(
         .font = font,
         .cui_write = capture_output,
         .cui_write_context = observation,
+        .command_context = observation,
         .start_module = start_module,
         .stop_module = stop_module,
         .module_context = observation,
@@ -120,7 +140,17 @@ static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
         &boot_info, framebuffer, shadow, terminal_pixels, &font, &observation
     );
     IOS_TEST_ASSERT_STATUS(ios_shell_bootstrap(&shell, &config), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_command_register(&shell.commands, &service_descriptor), IOS_OK
+    );
     IOS_TEST_ASSERT(shell.cui_usable && !shell.gui_running);
+    for (const char *input = "service"; *input != '\0'; ++input) {
+        IOS_TEST_ASSERT_STATUS(
+            ios_cui_console_feed(&shell.standalone_console, (ios_u8)*input), IOS_OK
+        );
+    }
+    IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&shell.standalone_console, '\n'), IOS_OK);
+    IOS_TEST_ASSERT(observation.command_calls == 1);
     for (const char *input = "gui"; *input != '\0'; ++input) {
         IOS_TEST_ASSERT_STATUS(
             ios_cui_console_feed(&shell.standalone_console, (ios_u8)*input), IOS_OK
@@ -134,6 +164,31 @@ static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
     IOS_TEST_ASSERT(shell.terminal.console.registry == &shell.commands);
     IOS_TEST_ASSERT(shell.standalone_console.registry == &shell.commands);
     IOS_TEST_ASSERT(strcmp(shell.diagnostic, "gui_ready") == 0);
+
+    for (const char *input = "service"; *input != '\0'; ++input) {
+        IOS_TEST_ASSERT_STATUS(
+            ios_terminal_feed_event(&shell.terminal, &(struct ios_input_event){
+                .structure_size = sizeof(struct ios_input_event),
+                .structure_version = IOS_INPUT_EVENT_VERSION,
+                .type = IOS_INPUT_EVENT_KEY,
+                .flags = IOS_INPUT_PRESSED,
+                .text = *input
+            }),
+            IOS_OK
+        );
+    }
+    IOS_TEST_ASSERT_STATUS(
+        ios_terminal_feed_event(&shell.terminal, &(struct ios_input_event){
+            .structure_size = sizeof(struct ios_input_event),
+            .structure_version = IOS_INPUT_EVENT_VERSION,
+            .type = IOS_INPUT_EVENT_KEY,
+            .flags = IOS_INPUT_PRESSED,
+            .code = IOS_KEY_ENTER,
+            .text = '\n'
+        }),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT(observation.command_calls == 2);
 
     ios_shell_stop_gui(&shell, NULL);
     IOS_TEST_ASSERT(!shell.gui_running && shell.cui_usable);

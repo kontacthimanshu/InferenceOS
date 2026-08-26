@@ -3,6 +3,8 @@
 
 #include <inferenceos/fs/records.h>
 
+struct ios_fs_registry;
+
 struct ios_fs_transaction_operations {
     ios_status (*persist_content)(void *context, const void *bytes, ios_size length);
     ios_status (*persist_allocation)(void *context);
@@ -16,6 +18,9 @@ struct ios_fs_transaction_operations {
 struct ios_fs_transaction {
     void *context;
     struct ios_fs_transaction_operations operations;
+    struct ios_fs_registry *registry;
+    ios_u32 registry_directory_cluster;
+    ios_u16 registry_primary_slot;
     bool writable;
 };
 
@@ -24,6 +29,12 @@ ios_status ios_fs_transaction_initialize(
     void *context,
     const struct ios_fs_transaction_operations *operations,
     bool writable
+);
+ios_status ios_fs_transaction_attach_registry(
+    struct ios_fs_transaction *transaction,
+    struct ios_fs_registry *registry,
+    ios_u32 directory_cluster,
+    ios_u16 primary_slot
 );
 ios_status ios_fs_transaction_create(
     struct ios_fs_transaction *transaction,

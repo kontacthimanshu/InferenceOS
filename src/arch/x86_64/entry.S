@@ -114,42 +114,6 @@ x86_64_halt_forever:
     jmp .Lhalt
 .size x86_64_halt_forever, .-x86_64_halt_forever
 
-.global x86_64_enter_user
-.type x86_64_enter_user,@function
-/* RDI = user RIP, RSI = user RSP, RDX = first user argument. */
-x86_64_enter_user:
-    cli
-    movq %rdi, %r8
-    movq %rsi, %r9
-    movq %rdx, %rdi
-
-    movw $0x1b, %ax
-    movw %ax, %ds
-    movw %ax, %es
-
-    pushq $0x1b
-    pushq %r9
-    pushq $0x202
-    pushq $0x23
-    pushq %r8
-
-    xorl %eax, %eax
-    xorl %ebx, %ebx
-    xorl %ecx, %ecx
-    xorl %edx, %edx
-    xorl %ebp, %ebp
-    xorl %esi, %esi
-    xorl %r8d, %r8d
-    xorl %r9d, %r9d
-    xorl %r10d, %r10d
-    xorl %r11d, %r11d
-    xorl %r12d, %r12d
-    xorl %r13d, %r13d
-    xorl %r14d, %r14d
-    xorl %r15d, %r15d
-    iretq
-.size x86_64_enter_user, .-x86_64_enter_user
-
 .macro X86_64_SAVE_REGISTERS
     pushq %rax
     pushq %rbx

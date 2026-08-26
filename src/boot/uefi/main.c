@@ -20,9 +20,41 @@ const struct efi_guid ios_efi_graphics_output_guid = {
     UINT32_C(0x9042a9de), UINT16_C(0x23dc), UINT16_C(0x4a38),
     { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a }
 };
+const struct efi_guid ios_efi_acpi_20_table_guid = {
+    UINT32_C(0x8868e871), UINT16_C(0xe4f1), UINT16_C(0x11d3),
+    { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 }
+};
+const struct efi_guid ios_efi_acpi_table_guid = {
+    UINT32_C(0xeb9d2d30), UINT16_C(0x2d88), UINT16_C(0x11d3),
+    { 0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d }
+};
 
 static struct efi_system_table *system_table;
 typedef void (IOS_SYSV_API *ios_kernel_entry)(const struct ios_boot_info *);
+
+static bool guid_equal(const struct efi_guid *left, const struct efi_guid *right)
+{
+    return memcmp(left, right, sizeof(*left)) == 0;
+}
+
+static void *find_acpi_root(const struct efi_system_table *table)
+{
+    void *legacy = NULL;
+
+    if (table == NULL || table->configuration_table == NULL) {
+        return NULL;
+    }
+    for (efi_uintn index = 0; index < table->configuration_table_count; ++index) {
+        const struct efi_configuration_table *entry = &table->configuration_table[index];
+        if (guid_equal(&entry->vendor_guid, &ios_efi_acpi_20_table_guid)) {
+            return entry->vendor_table;
+        }
+        if (guid_equal(&entry->vendor_guid, &ios_efi_acpi_table_guid)) {
+            legacy = entry->vendor_table;
+        }
+    }
+    return legacy;
+}
 
 static void serial_write_byte(ios_u8 byte)
 {
@@ -143,7 +175,10 @@ static void seal_boot_info(struct ios_boot_info *information)
 efi_status IOS_UEFI_API IOS_SECTION(".text.entry") efi_main(
     efi_handle image_handle, struct efi_system_table *table
 ) {
-    static const efi_char16 kernel_path[] = { '\\','k','e','r','n','e','l','.','e','l','f',0 };
+    static const efi_char16 kernel_path[] = {
+        '\\','I','n','f','e','r','e','n','c','e','O','S','\\','K','e','r','n','e','l','\\',
+        'k','e','r','n','e','l','.','e','l','f',0
+    };
     static const efi_char16 manifest_path[] = {
         '\\','I','n','f','e','r','e','n','c','e','O','S','\\','S','y','s','t','e','m','\\',
         'm','o','d','u','l','e','s','.','m','a','n','i','f','e','s','t',0
@@ -182,6 +217,10 @@ efi_status IOS_UEFI_API IOS_SECTION(".text.entry") efi_main(
     firmware_status = environment.services->allocate_pool(EFI_LOADER_DATA, sizeof(*boot), (void **)&boot);
     if (EFI_STATUS_ERROR(firmware_status)) { return firmware_status; }
     memset(boot, 0, sizeof(*boot)); boot->structure_size = sizeof(*boot); boot->version = IOS_BOOT_INFO_VERSION;
+    boot->root_system_description_pointer = (ios_uptr)find_acpi_root(table);
+    if (boot->root_system_description_pointer == 0) {
+        diagnostic("ACPI root table is missing"); return EFI_NOT_FOUND;
+    }
     boot->module_descriptors_address = (ios_uptr)modules; boot->module_descriptor_count = (ios_u32)module_count;
     boot->module_descriptor_size = sizeof(*modules); boot->esp_device_handle = (ios_uptr)loaded_image->device_handle;
     if (!configure_graphics(boot) || gui_unavailable) {

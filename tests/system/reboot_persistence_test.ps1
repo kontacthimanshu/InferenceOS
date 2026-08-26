@@ -146,10 +146,9 @@ try {
             RequiredMarker = @($contract.TerminalMarker)
             ForbiddenMarker = @($failureMarker)
             RetainSuccessfulArtifacts = $true
-            ExtraQemuArgumentJson = ConvertTo-Json -Compress -InputObject ([string[]]@(
-                '-fw_cfg', 'name=opt/inferenceos/test_action,string=reboot_persistence_cycle',
-                '-fw_cfg', "name=opt/inferenceos/persistence_cycle,string=$($contract.Cycle)"
-            ))
+            TestAction = 'reboot_persistence_cycle'
+            TestArgument = [string]$contract.Cycle
+            TestSequence = [uint32]$contract.Cycle
         }
         if (-not [string]::IsNullOrWhiteSpace($OvmfCodePath)) {
             $runnerParameters.OvmfCodePath = $OvmfCodePath

@@ -160,10 +160,7 @@ $arguments.AddRange([string[]]@(
     '-RequiredMarker', $terminalMarker,
     '-ForbiddenMarker', $failureMarker,
     '-RetainSuccessfulArtifacts',
-    '-ExtraQemuArgumentJson',
-    (ConvertTo-Json -Compress -InputObject ([string[]]@(
-        '-fw_cfg', 'name=opt/inferenceos/test_action,string=format_mount_remount'
-    )))
+    '-TestAction', 'format_mount_remount'
 ))
 if (-not [string]::IsNullOrWhiteSpace($QemuPath)) { $arguments.AddRange([string[]]@('-QemuPath', $QemuPath)) }
 if (-not [string]::IsNullOrWhiteSpace($OvmfCodePath)) { $arguments.AddRange([string[]]@('-OvmfCodePath', $OvmfCodePath)) }

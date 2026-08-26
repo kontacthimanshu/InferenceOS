@@ -153,6 +153,43 @@ $manifestSource = Join-Path $moduleRoot 'InferenceOS/System/modules.manifest'
 if (-not [System.IO.File]::Exists($manifestSource)) {
     throw "Module directory does not contain InferenceOS/System/modules.manifest."
 }
+$systemRoot = Split-Path -Parent $manifestSource
+$hashSource = Join-Path $systemRoot 'modules.sha256'
+$fontSource = Join-Path $systemRoot 'inferenceos-8x16.psf2'
+foreach ($requiredSystemArtifact in @($hashSource, $fontSource)) {
+    if (-not [System.IO.File]::Exists($requiredSystemArtifact)) {
+        throw "Module directory is incomplete; missing '$requiredSystemArtifact'."
+    }
+}
+$hashLines = @(Get-Content -LiteralPath $hashSource)
+if ($hashLines.Count -lt 3 -or $hashLines[0] -cne 'INFERENCEOS-SYSTEM-HASHES|1') {
+    throw 'System hashes must use the INFERENCEOS-SYSTEM-HASHES version-1 format.'
+}
+$hashedPaths = @{}
+foreach ($line in $hashLines[1..($hashLines.Count - 1)]) {
+    $fields = $line.Split('|')
+    if ($fields.Count -ne 3 -or $fields[0] -notmatch '^[0-9a-f]{64}$' -or
+        $fields[2] -notmatch '^/InferenceOS/System/[A-Za-z0-9._-]+$') {
+        throw "Malformed system hash record '$line'."
+    }
+    $name = Split-Path -Leaf $fields[2]
+    if ($hashedPaths.ContainsKey($name.ToUpperInvariant())) {
+        throw "Duplicate system hash path '$($fields[2])'."
+    }
+    $source = Join-Path $systemRoot $name
+    if (-not [System.IO.File]::Exists($source) -or
+        [uint64](Get-Item -LiteralPath $source).Length -ne [uint64]$fields[1] -or
+        (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $fields[0]) {
+        throw "System hash verification failed for '$($fields[2])'."
+    }
+    $hashedPaths[$name.ToUpperInvariant()] = $true
+}
+foreach ($file in Get-ChildItem -LiteralPath $systemRoot -File) {
+    if ($file.Name -cne 'modules.sha256' -and
+        -not $hashedPaths.ContainsKey($file.Name.ToUpperInvariant())) {
+        throw "System artifact '$($file.Name)' is not covered by modules.sha256."
+    }
+}
 
 $root = New-Node '' $true
 $efi = Add-Child $root (New-Node 'EFI' $true)
@@ -162,7 +199,7 @@ $inference = Add-Child $root (New-Node 'InferenceOS' $true)
 $kernelDirectory = Add-Child $inference (New-Node 'Kernel' $true)
 [void](Add-Child $kernelDirectory (New-Node 'kernel.elf' $false ([System.IO.Path]::GetFullPath($KernelPath))))
 $system = Add-Child $inference (New-Node 'System' $true)
-Get-ChildItem -LiteralPath (Split-Path -Parent $manifestSource) -File | Sort-Object Name | ForEach-Object {
+Get-ChildItem -LiteralPath $systemRoot -File | Sort-Object Name | ForEach-Object {
     [void](Add-Child $system (New-Node $_.Name $false $_.FullName))
 }
 Assign-Names $root
@@ -264,7 +301,7 @@ $inputSpecs = @(
     "loader=$([System.IO.Path]::GetFullPath($LoaderPath))",
     "kernel=$([System.IO.Path]::GetFullPath($KernelPath))"
 )
-foreach ($file in Get-ChildItem -LiteralPath (Split-Path -Parent $manifestSource) -File | Sort-Object Name) {
+foreach ($file in Get-ChildItem -LiteralPath $systemRoot -File | Sort-Object Name) {
     $inputSpecs += "system.$($file.Name.ToLowerInvariant())=$($file.FullName)"
 }
 $properties = [ordered]@{

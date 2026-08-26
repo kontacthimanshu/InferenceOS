@@ -48,6 +48,9 @@ ios_status block_device_flush(struct ios_block_device *device);
 ios_u64 block_device_capacity_bytes(const struct ios_block_device *device);
 enum ios_block_device_status block_device_get_status(const struct ios_block_device *device);
 
+/* Platform discovery stays behind the generic block boundary. */
+ios_status block_platform_initialize_primary(struct ios_block_device *device);
+
 enum ios_block_cache_state {
     IOS_BLOCK_CACHE_EMPTY,
     IOS_BLOCK_CACHE_CLEAN,

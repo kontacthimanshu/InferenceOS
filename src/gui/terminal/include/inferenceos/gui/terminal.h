@@ -25,6 +25,7 @@ ios_status ios_terminal_start(
     const struct ios_psf2_font *font,
     struct ios_cui_command_registry *registry,
     void *command_context,
+    void *shell_context,
     ios_i32 x,
     ios_i32 y
 );

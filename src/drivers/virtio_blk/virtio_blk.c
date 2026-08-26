@@ -150,7 +150,15 @@ ios_status virtio_blk_poll(
     }
     request = &device->requests[request_id];
     if (request->state == IOS_VIRTIO_BLK_REQUEST_AVAILABLE) {
-        return IOS_ERROR(IOS_E_WOULD_BLOCK);
+        if (device->transport.service != NULL) {
+            result = device->transport.service(device->transport.context, device);
+            if (IOS_FAILED(result)) {
+                return result;
+            }
+        }
+        if (request->state == IOS_VIRTIO_BLK_REQUEST_AVAILABLE) {
+            return IOS_ERROR(IOS_E_WOULD_BLOCK);
+        }
     }
     if (request->state != IOS_VIRTIO_BLK_REQUEST_USED) return IOS_ERROR(IOS_E_INVALID_STATE);
     result = request->result;
@@ -158,6 +166,20 @@ ios_status virtio_blk_poll(
     memset(request, 0, sizeof(*request));
     --device->outstanding;
     return result;
+}
+
+void virtio_blk_fail(struct ios_virtio_blk_device *device, ios_status status)
+{
+    if (device == NULL || IOS_SUCCEEDED(status)) {
+        return;
+    }
+    for (ios_u16 index = 0; index < device->queue_capacity; ++index) {
+        if (device->requests[index].state == IOS_VIRTIO_BLK_REQUEST_AVAILABLE) {
+            device->requests[index].result = status;
+            device->requests[index].state = IOS_VIRTIO_BLK_REQUEST_USED;
+        }
+    }
+    device->ready = false;
 }
 
 ios_u64 virtio_blk_capacity_bytes(const struct ios_virtio_blk_device *device)

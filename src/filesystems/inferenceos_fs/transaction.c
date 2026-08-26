@@ -1,3 +1,4 @@
+#include <inferenceos/fs/registry.h>
 #include <inferenceos/fs/transaction.h>
 
 static ios_status validate_transaction(const struct ios_fs_transaction *transaction)
@@ -26,6 +27,25 @@ static ios_status persist_companion(
                                 );
 }
 
+static void refresh_registry_after_commit(
+    struct ios_fs_transaction *transaction,
+    const struct ios_fs_primary_disk *primary
+)
+{
+    struct ios_fs_companion_disk companion;
+    ios_size record_index;
+    if (transaction->registry == NULL) return;
+    if (IOS_FAILED(ios_fs_companion_encode(primary->name, true, &companion))) return;
+    (void)ios_fs_registry_refresh(
+        transaction->registry,
+        &companion,
+        primary,
+        transaction->registry_directory_cluster,
+        transaction->registry_primary_slot,
+        &record_index
+    );
+}
+
 ios_status ios_fs_transaction_initialize(
     struct ios_fs_transaction *transaction,
     void *context,
@@ -36,11 +56,30 @@ ios_status ios_fs_transaction_initialize(
     if (transaction == NULL || operations == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     transaction->context = context;
     transaction->operations = *operations;
+    transaction->registry = NULL;
+    transaction->registry_directory_cluster = 0;
+    transaction->registry_primary_slot = 0;
     transaction->writable = writable;
     {
         ios_status status = validate_transaction(transaction);
         return status == IOS_ERROR(IOS_E_READ_ONLY) ? IOS_OK : status;
     }
+}
+
+ios_status ios_fs_transaction_attach_registry(
+    struct ios_fs_transaction *transaction,
+    struct ios_fs_registry *registry,
+    ios_u32 directory_cluster,
+    ios_u16 primary_slot
+)
+{
+    if (transaction == NULL || registry == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    transaction->registry = registry;
+    transaction->registry_directory_cluster = directory_cluster;
+    transaction->registry_primary_slot = primary_slot;
+    return IOS_OK;
 }
 
 ios_status ios_fs_transaction_save(
@@ -75,7 +114,10 @@ ios_status ios_fs_transaction_save(
     if (IOS_FAILED(status)) return status;
     status = persist_companion(transaction, primary->name, true);
     if (IOS_FAILED(status)) return status;
-    return transaction->operations.barrier(transaction->context);
+    status = transaction->operations.barrier(transaction->context);
+    if (IOS_FAILED(status)) return status;
+    refresh_registry_after_commit(transaction, &primary_disk);
+    return IOS_OK;
 }
 
 ios_status ios_fs_transaction_create(
@@ -119,7 +161,10 @@ ios_status ios_fs_transaction_rename(
     if (IOS_FAILED(status)) return status;
     status = persist_companion(transaction, primary.name, true);
     if (IOS_FAILED(status)) return status;
-    return transaction->operations.barrier(transaction->context);
+    status = transaction->operations.barrier(transaction->context);
+    if (IOS_FAILED(status)) return status;
+    refresh_registry_after_commit(transaction, &renamed_disk);
+    return IOS_OK;
 }
 
 ios_status ios_fs_transaction_delete(

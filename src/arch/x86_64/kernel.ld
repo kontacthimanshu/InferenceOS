@@ -29,6 +29,10 @@ SECTIONS
     {
         __rodata_start = .;
         *(.rodata .rodata.*)
+        . = ALIGN(16);
+        __inferenceos_font_start = .;
+        KEEP(*(.inferenceos_font))
+        __inferenceos_font_end = .;
         __rodata_end = .;
     } :rodata
 

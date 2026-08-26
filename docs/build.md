@@ -55,13 +55,13 @@ Configure and build each preset in a checkout with no pre-existing `build/` dire
 
 ```bash
 cmake --preset gcc-debug
-cmake --build --preset gcc-debug
+cmake --build --preset gcc-debug --target inferenceos-image inferenceos-test-disk
 cmake --preset gcc-release
-cmake --build --preset gcc-release
+cmake --build --preset gcc-release --target inferenceos-image inferenceos-test-disk
 cmake --preset clang-debug
-cmake --build --preset clang-debug
+cmake --build --preset clang-debug --target inferenceos-image inferenceos-test-disk
 cmake --preset clang-release
-cmake --build --preset clang-release
+cmake --build --preset clang-release --target inferenceos-image inferenceos-test-disk
 ```
 
 Warnings are errors. GCC and Clang builds use freestanding ISO C17, the source-controlled extension
@@ -73,27 +73,7 @@ validation and native hosted tests with GCC and Clang.
 
 ## Package reference images
 
-The current cross-build compiles the production libraries and project-owned UEFI loader. It does
-not yet link a final `kernel.elf` or the static Shell/GUI application ELF files. Consequently, image
-packaging also requires:
-
-- an existing freestanding x86-64 `kernel.elf`; and
-- a version-1 `system_modules.json` whose `source` entries resolve to existing static x86-64 ELF64
-  applications and include exactly one required Shell.
-
-Pass their absolute paths while configuring a clean build directory:
-
-```bash
-cmake --preset gcc-debug \
-  -DINFERENCEOS_KERNEL_ELF_FILE=/absolute/path/to/kernel.elf \
-  -DINFERENCEOS_SYSTEM_MODULE_DEFINITION=/absolute/path/to/system_modules.json
-```
-
-This explicit prerequisite is a current build-integration limitation, not a claim that external
-artifacts are part of a reproducible InferenceOS release. A release-qualified clean-checkout image
-must wait until the final kernel and application link targets supply these inputs inside the build.
-
-With those inputs configured, package the primary GCC debug images:
+Package the primary GCC debug images directly from a clean checkout:
 
 ```bash
 cmake --build --preset gcc-debug --target inferenceos-image
@@ -102,11 +82,20 @@ cmake --build --preset gcc-debug --target inferenceos-test-disk
 
 Outputs are created under `build/gcc-debug/artifacts/`:
 
-- the generated `BOOTX64.EFI` and configured `kernel.elf`;
+- the project-built `BOOTX64.EFI`, `kernel.elf`, and six static application ELFs;
 - `inferenceos-esp.img`, a deterministic FAT32 ESP;
 - `inferenceos-persistent.raw`, a sparse 64 GiB logical disk;
-- versioned packaged system modules and `modules.manifest`;
+- target-generated version-1 `system_modules.json`, packaged modules, `modules.manifest`, and
+  `modules.sha256`;
+- the generated, kernel-embedded `fonts/inferenceos-8x16.psf2` asset and its packaged copy;
+- kernel/application `*.map` and sorted `*.sym` debugging artifacts, plus `BOOTX64.map`;
 - `*.manifest.json` image sidecars containing canonical recipes and content identities.
+
+No `kernel.elf`, application ELF, module definition, or font is accepted as an external packaging
+input. CMake generates the module definition from the named kernel/application targets, generates
+the PSF2 font from project-owned source, checks every packaged hash, and makes `inferenceos-image`
+depend on the complete target graph. The font source and generated PSF2 are MIT-licensed; see
+`assets/fonts/LICENSE.txt` and the repository `LICENSE`.
 
 The persistent disk has a large logical size but consumes little physical storage when the host
 filesystem supports sparse files. Copying it with a tool that expands sparse ranges may consume the
@@ -140,11 +129,35 @@ Run fast repository checks from PowerShell:
 
 ```powershell
 ./tools/test/validate_source_layout.ps1
-./tools/test/validate_dependencies.ps1
+./tools/test/validate_dependencies.ps1 -SelfTest `
+  -EvidencePath build/validation/dependency-boundaries.json
+./tools/test/generate_validation_report.ps1 `
+  -EvidenceDirectory build/validation -OutputDirectory build/validation
 ./tests/system/bootstrap_test.ps1
 ./tests/system/artifact_manifest_test.ps1
 ./tests/system/qemu_profile_test.ps1
 ```
+
+The dependency validator scans every production C/header file and enforces four static boundaries:
+
+- GUI, Shell, and applications cannot include or call VFS, InferenceOS-FS, block, or virtio-blk APIs.
+- InferenceOS-FS cannot depend on GUI/CUI/Shell APIs or the concrete virtio-blk driver.
+- VFS cannot depend on InferenceOS-FS internals or a concrete storage driver.
+- Code outside the generic block layer and virtio-blk driver cannot communicate with virtio-blk.
+
+`-SelfTest` exercises both include and symbol detection for every rule. `-EvidencePath` writes a
+deterministic, repository-relative JSON report containing the rule catalog, inspected-file count,
+self-test result, and any violations. The `inferenceos-validate-dependencies` target and the
+`dependency-validation` CTest use `build/<configuration>/validation/dependency-boundaries.json`.
+
+The validation-report generator reads SC-001 through SC-020 directly from the feature specification
+and maps each criterion to its implementation tasks, validation tasks, source tests, CTest names,
+QEMU suites, artifact contracts, and reproduction commands. It discovers retained dual-compiler
+JUnit XML, QEMU release manifests, dependency evidence, registry benchmark reports, and the
+clean-checkout report, then emits deterministic `validation-traceability.json` and
+`validation-traceability.md`. Missing evidence is reported as `not-collected` or `incomplete`;
+use `-RequireComplete` only after the complete release matrix has been archived. The equivalent
+CMake entry point is `inferenceos-validation-report`.
 
 Hosted C tests require a native, non-cross-compiling configuration. For GCC:
 
@@ -189,4 +202,5 @@ interoperability. It writes `evidence-manifest.json` with suite outcomes and has
 InferenceOS project-authored source is available under the MIT License; see `LICENSE`. Bootstrap
 dependencies remain under their respective upstream licenses and are downloaded from the URLs in
 `tools/bootstrap/versions.json`. The project license does not relicense those external tools or
-firmware.
+firmware. The project-authored PSF2 font is also MIT-licensed, with provenance recorded in
+`assets/fonts/LICENSE.txt`.

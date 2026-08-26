@@ -305,7 +305,7 @@ with a generated sparse disk using one documented command sequence.
 - [X] T109 [US12] Add deterministic image manifests and reproducibility checks to `tools/image/build_esp.ps1`, `tools/image/create_persistent_disk.ps1`, and `tools/image/write_manifest.ps1`
 - [X] T110 [US12] Validate and document host-portable behavior of the foundational q35/OVMF/TCG profile in `tests/system/qemu_profile_test.ps1`
 - [X] T111 [P] [US12] Document clean build, tool versions, launch, limitations, and licensing in `docs/build.md`, `docs/limitations.md`, and `LICENSE`
-- [ ] T112 [US12] Wire aggregate release-validation and artifact-manifest targets in `CMakeLists.txt`
+- [X] T112 [US12] Wire aggregate release-validation and artifact-manifest targets in `CMakeLists.txt`
 
 ---
 
@@ -320,17 +320,17 @@ disabled mode passes all mandatory tests.
 
 ### Tests for User Story 6 (MANDATORY)
 
-- [ ] T113 [P] [US6] Add registry codec/create/refresh/rebuild and authorized non-mutating diagnostic tests in `tests/unit/extension_registry_test.c` and `tests/contract/registry_diagnostics_test.c`
-- [ ] T114 [P] [US6] Add disabled/full/stale/corrupt and post-reboot fallback tests proving registry state cannot override authoritative records in `tests/fault/registry_fallback_test.c`
-- [ ] T115 [US6] Add Shell-backed File Explorer enabled-registry type-view integration coverage and a matched corpus/query benchmark harness in `tests/integration/registry_file_view_test.c` and `tests/benchmarks/registry_benchmark.c`
+- [X] T113 [P] [US6] Add registry codec/create/refresh/rebuild and authorized non-mutating diagnostic tests in `tests/unit/extension_registry_test.c` and `tests/contract/registry_diagnostics_test.c`
+- [X] T114 [P] [US6] Add disabled/full/stale/corrupt and post-reboot fallback tests proving registry state cannot override authoritative records in `tests/fault/registry_fallback_test.c`
+- [X] T115 [US6] Add Shell-backed File Explorer enabled-registry type-view integration coverage and a matched corpus/query benchmark harness in `tests/integration/registry_file_view_test.c` and `tests/benchmarks/registry_benchmark.c`
 
 ### Implementation for User Story 6
 
-- [ ] T116 [US6] Implement version-1 registry record codec and validation in `src/filesystems/inferenceos_fs/registry_record.c`
-- [ ] T117 [US6] Implement default-off refresh/rebuild/fallback registry service in `src/filesystems/inferenceos_fs/registry.c`
-- [ ] T118 [US6] Integrate optional registry updates without making commits authoritative in `src/filesystems/inferenceos_fs/transaction.c`
-- [ ] T119 [US6] Implement authorized, non-mutating registry diagnostics and runtime enablement control in `src/filesystems/inferenceos_fs/registry_diagnostics.c`
-- [ ] T120 [US6] Implement TCG marker collection and benchmark report generation in `tools/test/run_registry_benchmark.ps1`
+- [X] T116 [US6] Implement version-1 registry record codec and validation in `src/filesystems/inferenceos_fs/registry_record.c`
+- [X] T117 [US6] Implement default-off refresh/rebuild/fallback registry service in `src/filesystems/inferenceos_fs/registry.c`
+- [X] T118 [US6] Integrate optional registry updates without making commits authoritative in `src/filesystems/inferenceos_fs/transaction.c`
+- [X] T119 [US6] Implement authorized, non-mutating registry diagnostics and runtime enablement control in `src/filesystems/inferenceos_fs/registry_diagnostics.c`
+- [X] T120 [US6] Implement TCG marker collection and benchmark report generation in `tools/test/run_registry_benchmark.ps1`
 
 ---
 
@@ -338,11 +338,11 @@ disabled mode passes all mandatory tests.
 
 **Purpose**: Prove the complete constitutional release claim and finish documentation.
 
-- [ ] T121 [P] Run and document static dependency/VFS-boundary enforcement in `tools/test/validate_dependencies.ps1`
-- [ ] T122 [P] Add full SC-001-SC-020 traceability report generator in `tools/test/generate_validation_report.ps1`
+- [X] T121 [P] Run and document static dependency/VFS-boundary enforcement in `tools/test/validate_dependencies.ps1`
+- [X] T122 [P] Add full SC-001-SC-020 traceability report generator in `tools/test/generate_validation_report.ps1`
 - [ ] T123 Run the complete dual-compiler, host, integration, fault, and QEMU matrix and archive evidence under `build/validation/`
-- [ ] T124 [P] Document InferenceOS-FS format, extension hash, and recovery states in `docs/inferenceos-fs.md`
-- [ ] T125 [P] Document CUI commands, GUI architecture, and application contracts in `docs/cui.md`, `docs/gui.md`, and `docs/applications.md`
+- [X] T124 [P] Document InferenceOS-FS format, extension hash, and recovery states in `docs/inferenceos-fs.md`
+- [X] T125 [P] Document CUI commands, GUI architecture, and application contracts in `docs/cui.md`, `docs/gui.md`, and `docs/applications.md`
 - [ ] T126 Validate the clean-checkout workflow against `specs/001-inferenceos/quickstart.md`
 - [ ] T127 Perform final Constitution Check and release-claim audit in `docs/validation/constitution-check.md`
 
@@ -433,3 +433,19 @@ Foundational
   and independent-story checkpoint must pass.
 - Keep the Extension Registry disabled by default unless T115/T120 satisfy the predefined gate.
 - Any required on-disk layout change must return to specification and constitution review before code.
+
+---
+
+## Phase 16: Convergence
+
+**Purpose**: Close the final-system gaps exposed by T123. The existing host-tested components are
+retained; these tasks connect them into the bootable q35/OVMF demonstrator required by the
+specification and Constitution.
+
+- [X] T128 CRITICAL Implement and link the freestanding `kernel.elf`, including `kernel_main` boot-information validation, early failure diagnostics, memory/platform initialization, and the transition from `src/arch/x86_64/entry.S` into the kernel runtime in `src/kernel/main.c`, `src/arch/x86_64/kernel.ld`, and `CMakeLists.txt` (missing; Constitution I and XI, User Story 1 acceptance criterion 1, FR-002, FR-016, FR-020, FR-257, SC-001, SC-020)
+- [X] T129 CRITICAL Complete runnable ring-3 process scheduling by preserving/restoring user contexts across timer interrupts, entering each loaded process at its ELF entry point with its private stack/address space, resuming blocked processes, and terminating through the syscall path in `src/arch/x86_64/context.S`, `src/arch/x86_64/entry.S`, `src/kernel/scheduler/scheduler.c`, and `src/kernel/process/process.c` (partial; Constitution I, plan Technical Context execution model, FR-027 through FR-040, and the implementation claims of T013, T016, and T017)
+- [X] T130 CRITICAL Implement the concrete q35 virtio-blk PCI transport—device enumeration, capability/BAR validation and mapping, feature negotiation, DMA-safe virtqueues, request completion, flush, timeout/error handling, and publication through the generic block API—in `src/arch/x86_64/pci.c`, `src/drivers/virtio_blk/transport_pci.c`, and `src/drivers/virtio_blk/virtio_blk.c` (partial; Constitution II and V, User Story 2 acceptance criterion 1, FR-043, FR-054 through FR-064, SC-003, and the implementation claim of T042)
+- [X] T131 CRITICAL Add the live kernel composition root that initializes interrupts and PS/2 input, storage/cache/VFS/InferenceOS-FS, the complete shared CUI command registry, Shell IPC services, desktop/terminal/File Explorer, diagnostics, and synchronized q35 reboot/shutdown while preserving CUI recovery on GUI failure in `src/kernel/runtime.c`, `src/cui/`, `src/shell/`, and the affected driver/service adapters (missing; Constitution I, II, VII, VIII, and X, User Stories 1, 2, 4, 5, and 11, FR-016 through FR-030, FR-042 through FR-044, FR-179, SC-001 through SC-004)
+- [X] T132 CRITICAL Create the freestanding user runtime and separately linked static ELF64 system-application images for Shell, GUI desktop, GUI terminal, File Explorer, proprietary test, and custom test, with CRT entry points plus versioned syscall/IPC client glue and no direct filesystem-driver linkage, in `src/runtime/user/`, `src/applications/`, `src/shell/`, `src/gui/`, and `CMakeLists.txt` (missing; Constitution I through IV, plan Technical Context application model, FR-027 through FR-040, FR-217 through FR-224, and SC-011 through SC-014)
+- [X] T133 HIGH Generate the versioned `system_modules.json`, hashes, symbols/maps, licensed PSF2 font asset, and complete ESP directly from the kernel and application targets so `inferenceos-image` has no external prebuilt kernel/module inputs, updating `CMakeLists.txt`, `tools/image/build_system_modules.ps1`, `tools/image/build_esp.ps1`, and the documented clean-build workflow (partial; Constitution VIII and XI, plan Primary Dependencies, FR-232, FR-254 through FR-258, SC-018 through SC-020, and the implementation claims of T024, T027, T109, and T112)
+- [ ] T134 HIGH Implement the guest-side q35 test-control protocol and stable serial evidence markers for boot/GUI recovery, input, format/mount, file and directory workflows, persistence cycles, fault injection, and registry benchmark counters, then bind the existing release suites to those real guest actions in `src/kernel/test_control.c`, the affected runtime services, `tools/test/run_inferenceos.ps1`, and `tools/test/run_qemu_tests.ps1` (missing; Constitution XI, FR-239 through FR-253, SC-001 through SC-020, and T123)

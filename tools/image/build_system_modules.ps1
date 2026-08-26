@@ -29,6 +29,10 @@ function Read-UInt64LE([byte[]]$Bytes, [int]$Offset) {
     return $value
 }
 
+function Read-UInt32LE([byte[]]$Bytes, [int]$Offset) {
+    return [BitConverter]::ToUInt32($Bytes, $Offset)
+}
+
 function Assert-StaticElf64([string]$Path) {
     [byte[]]$header = [System.IO.File]::ReadAllBytes($Path)
     if ($header.Length -lt 64 -or $header[0] -ne 0x7f -or $header[1] -ne 0x45 -or
@@ -54,13 +58,24 @@ function Assert-StaticElf64([string]$Path) {
     }
 }
 
+function Assert-Psf2Font([string]$Path) {
+    [byte[]]$font = [System.IO.File]::ReadAllBytes($Path)
+    if ($font.Length -lt 32 -or (Read-UInt32LE $font 0) -ne 2253043058 -or
+        (Read-UInt32LE $font 4) -ne 0 -or (Read-UInt32LE $font 8) -ne 32 -or
+        (Read-UInt32LE $font 12) -ne 0 -or (Read-UInt32LE $font 16) -ne 256 -or
+        (Read-UInt32LE $font 20) -ne 16 -or (Read-UInt32LE $font 24) -ne 16 -or
+        (Read-UInt32LE $font 28) -ne 8 -or $font.Length -ne 4128) {
+        throw "Asset '$Path' is not the required Unicode-free 256-glyph 8x16 PSF2 font."
+    }
+}
+
 function Get-NormalizedEspPath([string]$Path) {
     $normalized = $Path.Replace('\', '/')
     if (-not $normalized.StartsWith('/') -or $normalized.Contains('//') -or
         $normalized.Contains('/./') -or $normalized.Contains('/../') -or
         $normalized.EndsWith('/') -or $normalized.Length -gt 255 -or
         $normalized -notmatch '^/InferenceOS/System/[A-Za-z0-9._-]+$') {
-        throw "Invalid module ESP path '$Path'. Use /InferenceOS/System/<file>."
+        throw "Invalid ESP path '$Path'. Use /InferenceOS/System/<file>."
     }
     return $normalized
 }
@@ -79,6 +94,7 @@ $seenIdentity = @{}
 $seenRole = @{}
 $seenPath = @{}
 $records = [System.Collections.Generic.List[object]]::new()
+$assetRecords = [System.Collections.Generic.List[object]]::new()
 $shellCount = 0
 
 foreach ($module in $modules) {
@@ -123,11 +139,37 @@ foreach ($module in $modules) {
 }
 if ($shellCount -ne 1) { throw "Exactly one required Shell module is mandatory." }
 
+$assets = @()
+if ($null -ne $definition.PSObject.Properties['assets']) {
+    $assets = @($definition.assets)
+}
+if ($assets.Count -gt 8) { throw 'Module definition cannot contain more than 8 assets.' }
+foreach ($asset in $assets) {
+    $kind = ([string]$asset.kind).ToLowerInvariant()
+    if ($kind -ne 'psf2_font') { throw "Unknown system asset kind '$kind'." }
+    if ([string]$asset.license -cne 'MIT') {
+        throw "The PSF2 font asset must carry its explicit MIT license identifier."
+    }
+    $source = [System.IO.Path]::GetFullPath((Join-Path $definitionRoot ([string]$asset.source)))
+    if (-not [System.IO.File]::Exists($source)) { throw "Asset source '$source' does not exist." }
+    Assert-Psf2Font $source
+    $espPath = Get-NormalizedEspPath ([string]$asset.esp_path)
+    $pathKey = $espPath.ToUpperInvariant()
+    if ($seenPath.ContainsKey($pathKey)) { throw "Duplicate ESP path '$espPath'." }
+    $seenPath[$pathKey] = $true
+    $file = Get-Item -LiteralPath $source
+    $assetRecords.Add([pscustomobject]@{
+        Kind = $kind; Length = [uint64]$file.Length
+        Digest = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        EspPath = $espPath; Source = $source
+    })
+}
+
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 if ($outputRoot -eq [System.IO.Path]::GetPathRoot($outputRoot) -or $outputRoot -eq $definitionRoot) {
     throw "Output directory '$outputRoot' is too broad or overlaps the definition directory."
 }
-foreach ($record in $records) {
+foreach ($record in @($records) + @($assetRecords)) {
     $outputPrefix = $outputRoot.TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
         [System.IO.Path]::AltDirectorySeparatorChar
@@ -155,4 +197,25 @@ foreach ($record in ($records | Sort-Object Identity)) {
 $manifestPath = Join-Path $outputRoot "InferenceOS/System/modules.manifest"
 $manifestText = ($lines -join "`n") + "`n"
 [System.IO.File]::WriteAllText($manifestPath, $manifestText, [System.Text.UTF8Encoding]::new($false))
+
+foreach ($record in ($assetRecords | Sort-Object EspPath)) {
+    $relative = $record.EspPath.TrimStart('/').Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+    $destination = Join-Path $outputRoot $relative
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+    [System.IO.File]::Copy($record.Source, $destination, $false)
+}
+
+$hashLines = [System.Collections.Generic.List[string]]::new()
+$hashLines.Add('INFERENCEOS-SYSTEM-HASHES|1')
+$packagedRecords = @($records) + @($assetRecords)
+foreach ($record in ($packagedRecords | Sort-Object EspPath)) {
+    $hashLines.Add("$($record.Digest)|$($record.Length)|$($record.EspPath)")
+}
+$manifestFile = Get-Item -LiteralPath $manifestPath
+$manifestDigest = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$hashLines.Add("$manifestDigest|$([uint64]$manifestFile.Length)|/InferenceOS/System/modules.manifest")
+$hashPath = Join-Path $outputRoot 'InferenceOS/System/modules.sha256'
+[System.IO.File]::WriteAllText(
+    $hashPath, ($hashLines -join "`n") + "`n", [System.Text.UTF8Encoding]::new($false)
+)
 Write-Output $manifestPath

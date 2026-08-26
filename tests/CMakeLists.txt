@@ -7,6 +7,7 @@ function(inferenceos_add_host_test target)
         PRIVATE
             "${PROJECT_SOURCE_DIR}/src/kernel/include"
             "${PROJECT_SOURCE_DIR}/src/runtime/include"
+            "${PROJECT_SOURCE_DIR}/src/runtime/user/include"
             "${PROJECT_SOURCE_DIR}/src/arch/x86_64/include"
             "${PROJECT_SOURCE_DIR}/src/boot/uefi"
             "${PROJECT_SOURCE_DIR}/src/drivers/ps2/include"
@@ -35,6 +36,42 @@ function(inferenceos_add_host_test target)
         PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
     )
 endfunction()
+
+inferenceos_add_host_test(
+    inferenceos_user_runtime_test
+    unit/user_runtime_test.c
+    "${PROJECT_SOURCE_DIR}/src/runtime/user/syscall.c"
+)
+add_test(NAME user-runtime-unit COMMAND inferenceos_user_runtime_test)
+set_tests_properties(
+    user-runtime-unit PROPERTIES LABELS "host;unit;runtime;syscall;ipc;application"
+)
+
+inferenceos_add_host_test(
+    inferenceos_test_control_protocol_test
+    unit/test_control_protocol_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/test_control.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/string.c"
+)
+add_test(NAME test-control-protocol-unit COMMAND inferenceos_test_control_protocol_test)
+set_tests_properties(
+    test-control-protocol-unit PROPERTIES LABELS "host;unit;qemu;test-control;protocol"
+)
+
+inferenceos_add_host_test(
+    inferenceos_user_ipc_syscall_test
+    contract/user_ipc_syscall_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/ipc.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/ipc/ipc.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/process/handle_table.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/scheduler/wait_queue.c"
+)
+add_test(NAME user-ipc-syscall-contract COMMAND inferenceos_user_ipc_syscall_test)
+set_tests_properties(
+    user-ipc-syscall-contract
+    PROPERTIES LABELS "host;contract;syscall;ipc;usercopy;application"
+)
 
 inferenceos_add_host_test(
     inferenceos_scheduler_test
@@ -167,6 +204,37 @@ set_tests_properties(
     directory-record-unit PROPERTIES LABELS "host;unit;filesystem;metadata;codec;collision"
 )
 
+set(_inferenceos_extension_registry_test_sources
+    unit/extension_registry_test.c
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+)
+foreach(_registry_source registry_record.c registry.c)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}")
+        list(APPEND
+            _inferenceos_extension_registry_test_sources
+            "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}"
+        )
+    endif()
+endforeach()
+inferenceos_add_host_test(
+    inferenceos_extension_registry_test
+    ${_inferenceos_extension_registry_test_sources}
+)
+unset(_registry_source)
+unset(_inferenceos_extension_registry_test_sources)
+target_include_directories(
+    inferenceos_extension_registry_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+)
+add_test(NAME extension-registry-unit COMMAND inferenceos_extension_registry_test)
+set_tests_properties(
+    extension-registry-unit
+    PROPERTIES LABELS "host;unit;filesystem;registry;metadata;codec;rebuild"
+)
+
 inferenceos_add_host_test(
     inferenceos_directory_growth_test
     integration/directory_growth_test.c
@@ -227,6 +295,8 @@ inferenceos_add_host_test(
     inferenceos_file_commit_fault_test
     fault/file_commit_fault_test.c
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/transaction.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/registry.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/registry_record.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
@@ -244,7 +314,10 @@ set_tests_properties(
 inferenceos_add_host_test(
     inferenceos_boot_info_test
     unit/boot_info_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/boot_info.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
 )
+target_compile_options(inferenceos_boot_info_test PRIVATE -fno-builtin)
 add_test(NAME boot-info-unit COMMAND inferenceos_boot_info_test)
 set_tests_properties(boot-info-unit PROPERTIES LABELS "host;unit;boot")
 
@@ -307,6 +380,7 @@ inferenceos_add_host_test(
     "${PROJECT_SOURCE_DIR}/src/kernel/process/process.c"
     "${PROJECT_SOURCE_DIR}/src/kernel/scheduler/scheduler.c"
     "${PROJECT_SOURCE_DIR}/src/kernel/scheduler/wait_queue.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/dispatch.c"
 )
 add_test(NAME process-lifecycle-integration COMMAND inferenceos_process_lifecycle_test)
 set_tests_properties(process-lifecycle-integration PROPERTIES LABELS "host;integration")
@@ -344,10 +418,14 @@ inferenceos_add_host_test(
 )
 target_sources(
     inferenceos_virtio_block_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/arch/x86_64/pci.c"
+        "${PROJECT_SOURCE_DIR}/src/block/device.c"
         "${PROJECT_SOURCE_DIR}/src/drivers/virtio_blk/virtio_blk.c"
+        "${PROJECT_SOURCE_DIR}/src/drivers/virtio_blk/transport_pci.c"
 )
 target_include_directories(
     inferenceos_virtio_block_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/block/include"
         "${PROJECT_SOURCE_DIR}/src/drivers/virtio_blk/include"
 )
 target_link_libraries(inferenceos_virtio_block_test PRIVATE InferenceOS::TestSupport)
@@ -515,6 +593,39 @@ add_test(NAME fs-diagnostic-service-contract COMMAND inferenceos_fs_diagnostic_s
 set_tests_properties(
     fs-diagnostic-service-contract
     PROPERTIES LABELS "host;contract;kernel;filesystem;capability;diagnostic;bounds"
+)
+
+set(_inferenceos_registry_diagnostics_test_sources
+    contract/registry_diagnostics_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/process/handle_table.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+)
+foreach(_registry_source registry_record.c registry.c registry_diagnostics.c)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}")
+        list(APPEND
+            _inferenceos_registry_diagnostics_test_sources
+            "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}"
+        )
+    endif()
+endforeach()
+inferenceos_add_host_test(
+    inferenceos_registry_diagnostics_test
+    ${_inferenceos_registry_diagnostics_test_sources}
+)
+unset(_registry_source)
+unset(_inferenceos_registry_diagnostics_test_sources)
+target_include_directories(
+    inferenceos_registry_diagnostics_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+add_test(NAME registry-diagnostics-contract COMMAND inferenceos_registry_diagnostics_test)
+set_tests_properties(
+    registry-diagnostics-contract
+    PROPERTIES LABELS "host;contract;filesystem;registry;capability;diagnostic;non-mutating"
 )
 
 inferenceos_add_host_test(
@@ -702,6 +813,76 @@ set_tests_properties(
     PROPERTIES LABELS "host;integration;shell;ipc;file-explorer;refresh;restart;metadata-hiding"
 )
 
+set(_inferenceos_registry_file_view_test_sources
+    integration/registry_file_view_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/process/handle_table.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/ipc/ipc.c"
+    "${PROJECT_SOURCE_DIR}/src/shell/service.c"
+    "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/client.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/model.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/view_provider.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+)
+foreach(_registry_source registry_record.c registry.c)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}")
+        list(APPEND
+            _inferenceos_registry_file_view_test_sources
+            "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}"
+        )
+    endif()
+endforeach()
+inferenceos_add_host_test(
+    inferenceos_registry_file_view_test
+    ${_inferenceos_registry_file_view_test_sources}
+)
+unset(_registry_source)
+unset(_inferenceos_registry_file_view_test_sources)
+target_include_directories(
+    inferenceos_registry_file_view_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+add_test(NAME registry-file-view-integration COMMAND inferenceos_registry_file_view_test)
+set_tests_properties(
+    registry-file-view-integration
+    PROPERTIES LABELS "host;integration;shell;ipc;file-explorer;filesystem;registry;metadata-hiding"
+)
+
+set(_inferenceos_registry_benchmark_test_sources
+    benchmarks/registry_benchmark.c
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+)
+foreach(_registry_source registry_record.c registry.c)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}")
+        list(APPEND
+            _inferenceos_registry_benchmark_test_sources
+            "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}"
+        )
+    endif()
+endforeach()
+inferenceos_add_host_test(
+    inferenceos_registry_benchmark_test
+    ${_inferenceos_registry_benchmark_test_sources}
+)
+unset(_registry_source)
+unset(_inferenceos_registry_benchmark_test_sources)
+target_include_directories(
+    inferenceos_registry_benchmark_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+)
+add_test(NAME registry-benchmark-contract COMMAND inferenceos_registry_benchmark_test)
+set_tests_properties(
+    registry-benchmark-contract
+    PROPERTIES LABELS "host;benchmark;filesystem;registry;reproducibility;matched"
+)
+
 inferenceos_add_host_test(
     inferenceos_mount_test
     integration/mount_test.c
@@ -756,6 +937,37 @@ add_test(NAME mount-validation-fault COMMAND inferenceos_mount_validation_test)
 set_tests_properties(
     mount-validation-fault
     PROPERTIES LABELS "host;fault;filesystem;mount;validation;corruption;storage"
+)
+
+set(_inferenceos_registry_fallback_test_sources
+    fault/registry_fallback_test.c
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+)
+foreach(_registry_source registry_record.c registry.c)
+    if(EXISTS "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}")
+        list(APPEND
+            _inferenceos_registry_fallback_test_sources
+            "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/${_registry_source}"
+        )
+    endif()
+endforeach()
+inferenceos_add_host_test(
+    inferenceos_registry_fallback_test
+    ${_inferenceos_registry_fallback_test_sources}
+)
+unset(_registry_source)
+unset(_inferenceos_registry_fallback_test_sources)
+target_include_directories(
+    inferenceos_registry_fallback_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+)
+add_test(NAME registry-fallback-fault COMMAND inferenceos_registry_fallback_test)
+set_tests_properties(
+    registry-fallback-fault
+    PROPERTIES LABELS "host;fault;filesystem;registry;fallback;reboot;authoritative"
 )
 
 inferenceos_add_host_test(

@@ -5,10 +5,10 @@ static ios_status gui_command(
 )
 {
     (void)arguments;
-    if (argument_count != 1 || io->command_context == NULL) {
+    if (argument_count != 1 || io->shell_context == NULL) {
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     }
-    return ios_shell_start_gui(io->command_context);
+    return ios_shell_start_gui(io->shell_context);
 }
 
 static const struct ios_cui_command gui_descriptor = {
@@ -34,7 +34,11 @@ ios_status ios_shell_bootstrap(
     status = ios_cui_command_register(&runtime->commands, &gui_descriptor);
     if (IOS_FAILED(status)) return status;
     io = (struct ios_cui_io){
-        config->cui_write, config->cui_write_context, runtime, NULL
+        .write = config->cui_write,
+        .write_context = config->cui_write_context,
+        .command_context = config->command_context,
+        .registry = NULL,
+        .shell_context = runtime
     };
     status = ios_cui_console_initialize(&runtime->standalone_console, &runtime->commands, io);
     if (IOS_FAILED(status)) return status;
@@ -87,7 +91,7 @@ ios_status ios_shell_start_gui(struct ios_shell_runtime *runtime)
     status = ios_terminal_start(
         &runtime->terminal, &runtime->desktop.window_manager,
         runtime->config.terminal_surface, runtime->config.font,
-        &runtime->commands, runtime, 32, 32
+        &runtime->commands, runtime->config.command_context, runtime, 32, 32
     );
     if (IOS_FAILED(status)) {
         ios_shell_stop_gui(runtime, "gui_unavailable: terminal");

@@ -19,6 +19,7 @@ enum {
 #define USER_VIRTUAL_END UINT64_C(0x0000800000000000)
 
 static bool execute_disable_enabled;
+static ios_uptr kernel_root_address;
 
 static ios_u16 pml4_index(ios_uptr address)
 {
@@ -291,8 +292,15 @@ ios_status virtual_memory_initialize(void)
     if (!physical_memory_is_initialized()) {
         return IOS_ERROR(IOS_E_INVALID_STATE);
     }
+    kernel_root_address = x86_64_paging_root();
     execute_disable_enabled = x86_64_paging_enable_execute_disable();
     return execute_disable_enabled ? IOS_OK : IOS_ERROR(IOS_E_NOT_SUPPORTED);
+}
+
+void virtual_kernel_address_space_activate(void)
+{
+    IOS_ASSERT(kernel_root_address != 0);
+    x86_64_paging_activate(kernel_root_address);
 }
 
 bool virtual_address_is_canonical(ios_uptr address)
@@ -344,7 +352,7 @@ ios_status virtual_address_space_create(struct ios_address_space *address_space)
     }
     root = (ios_u64 *)root_address;
     memset(root, 0, IOS_PAGE_SIZE);
-    current_root = (const ios_u64 *)x86_64_paging_root();
+    current_root = (const ios_u64 *)kernel_root_address;
 
     *root = *current_root;
     for (ios_u16 index = 256; index < PAGE_TABLE_ENTRY_COUNT; ++index) {
@@ -360,7 +368,7 @@ void virtual_address_space_destroy(struct ios_address_space *address_space)
 
     IOS_ASSERT(address_space != NULL);
     IOS_ASSERT(address_space->root_address != 0);
-    IOS_ASSERT(address_space->root_address != x86_64_paging_root());
+    IOS_ASSERT(address_space->root_address != kernel_root_address);
 
     root = (ios_u64 *)address_space->root_address;
     for (ios_u16 index = 2; index < 256; ++index) {

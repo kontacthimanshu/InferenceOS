@@ -4,6 +4,7 @@
 #include <inferenceos/memory.h>
 #include <inferenceos/handle_table.h>
 #include <inferenceos/system_module.h>
+#include <inferenceos/arch/context.h>
 
 enum {
     IOS_PROCESS_MAX_COUNT = 32,
@@ -26,6 +27,7 @@ struct ios_process {
     struct ios_address_space address_space;
     ios_uptr entry_point;
     ios_uptr user_stack_pointer;
+    struct x86_64_user_context user_context;
     ios_uptr kernel_stack_address;
     ios_u64 kernel_stack_pages;
     ios_i64 exit_status;
@@ -41,6 +43,7 @@ ios_status process_create_from_module(
 );
 void process_destroy(struct ios_process *process);
 void process_mark_exited(struct ios_process *process, ios_i64 exit_status);
+ios_status process_activate(struct ios_process *process);
 ios_status process_collect(struct ios_process *process, ios_i64 *exit_status);
 ios_status process_start_system_modules(
     const struct ios_system_module_descriptor *descriptors,

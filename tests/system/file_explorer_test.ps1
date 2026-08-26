@@ -69,9 +69,7 @@ $runnerParameters = @{
     RequiredMarker = @($terminalMarker)
     ForbiddenMarker = @($failureMarker)
     RetainSuccessfulArtifacts = $true
-    ExtraQemuArgumentJson = ConvertTo-Json -Compress -InputObject ([string[]]@(
-        '-fw_cfg', 'name=opt/inferenceos/test_action,string=file_explorer_fake_provider'
-    ))
+    TestAction = 'file_explorer_fake_provider'
 }
 if (-not [string]::IsNullOrWhiteSpace($OvmfCodePath)) { $runnerParameters.OvmfCodePath = $OvmfCodePath }
 if (-not [string]::IsNullOrWhiteSpace($OvmfVarsPath)) { $runnerParameters.OvmfVarsPath = $OvmfVarsPath }

@@ -48,11 +48,7 @@ void x86_64_interrupt_enable(void);
 void x86_64_interrupt_disable(void);
 ios_u64 x86_64_interrupt_save_disable(void);
 void x86_64_interrupt_restore(ios_u64 previous_flags);
+void x86_64_halt(void);
 _Noreturn void x86_64_halt_forever(void);
-_Noreturn void x86_64_enter_user(
-    ios_uptr instruction_pointer,
-    ios_uptr stack_pointer,
-    ios_uptr argument
-);
 
 #endif

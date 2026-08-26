@@ -29,6 +29,7 @@ enum ios_scheduler_task_state {
 };
 
 struct ios_scheduler_task;
+struct x86_64_interrupt_frame;
 
 struct ios_wait_queue {
     struct ios_scheduler_task *head;
@@ -37,6 +38,7 @@ struct ios_wait_queue {
 
 typedef void (*ios_kernel_work_function)(void *context);
 typedef void (*ios_idle_function)(void *context);
+typedef void (*ios_scheduler_tick_function)(void *context);
 
 struct ios_scheduler_task {
     ios_u64 task_id;
@@ -53,6 +55,9 @@ struct ios_scheduler_task {
 };
 
 ios_status scheduler_initialize(ios_idle_function idle, void *idle_context);
+ios_status scheduler_set_tick_function(
+    ios_scheduler_tick_function tick, void *tick_context
+);
 ios_status scheduler_platform_initialize(const void *root_system_description_pointer);
 ios_status scheduler_add_process(struct ios_process *process);
 ios_status scheduler_add_kernel_work(
@@ -64,10 +69,13 @@ ios_status scheduler_add_kernel_work(
 struct ios_scheduler_task *scheduler_select_next(void);
 struct ios_scheduler_task *scheduler_current_task(void);
 void scheduler_on_quantum(void);
+void scheduler_on_timer_interrupt(struct x86_64_interrupt_frame *frame);
 ios_u64 scheduler_tick_count(void);
 ios_status scheduler_block_current(struct ios_wait_queue *queue);
 ios_status scheduler_wake_task(struct ios_scheduler_task *task);
 ios_status scheduler_exit_current(ios_i64 exit_status);
+void scheduler_finish_switch(void);
+_Noreturn void scheduler_idle_loop(void);
 void scheduler_run_current(void);
 
 void wait_queue_initialize(struct ios_wait_queue *queue);

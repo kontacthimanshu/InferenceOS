@@ -8,14 +8,14 @@
 static ios_syscall_handler handlers[IOS_SYSCALL_MAX_NUMBER + 1];
 static bool dispatch_ready;
 
-IOS_STATIC_ASSERT(sizeof(struct ios_syscall_frame) == 80, "syscall frame assembly size");
-IOS_STATIC_ASSERT(offsetof(struct ios_syscall_frame, user_instruction_pointer) == 56,
-                  "syscall frame instruction-pointer offset");
-IOS_STATIC_ASSERT(offsetof(struct ios_syscall_frame, user_stack_pointer) == 72,
-                  "syscall frame stack-pointer offset");
+IOS_STATIC_ASSERT(sizeof(struct x86_64_user_context) == 144, "user context assembly size");
+IOS_STATIC_ASSERT(sizeof(struct ios_syscall_frame) == 200, "syscall frame assembly size");
+IOS_STATIC_ASSERT(offsetof(struct ios_syscall_frame, number) == 144,
+                  "syscall frame number offset");
+IOS_STATIC_ASSERT(offsetof(struct ios_syscall_frame, arguments) == 152,
+                  "syscall frame argument offset");
 
 extern void x86_64_syscall_entry(void);
-extern ios_uptr x86_64_syscall_kernel_stack;
 
 void syscall_dispatch_initialize(void)
 {
@@ -25,33 +25,21 @@ void syscall_dispatch_initialize(void)
 
 ios_status syscall_initialize(void)
 {
+    ios_status status;
     syscall_dispatch_initialize();
+    status = syscall_ipc_register();
+    if (IOS_FAILED(status)) return status;
     return x86_64_syscall_configure((ios_uptr)x86_64_syscall_entry);
 }
 
 void syscall_set_kernel_stack(ios_uptr kernel_stack_pointer)
 {
-    IOS_ASSERT(kernel_stack_pointer != 0);
-    IOS_ASSERT((kernel_stack_pointer & UINT64_C(0xf)) == 0);
-    x86_64_syscall_kernel_stack = kernel_stack_pointer;
+    x86_64_syscall_set_kernel_stack(kernel_stack_pointer);
 }
 
 ios_status syscall_activate_process(struct ios_process *process)
 {
-    ios_uptr kernel_stack_top;
-    if (process == NULL || process->state != IOS_PROCESS_RUNNABLE
-        || process->address_space.root_address == 0 || process->kernel_stack_address == 0
-        || process->kernel_stack_pages == 0
-        || process->kernel_stack_pages > UINT64_MAX / IOS_PAGE_SIZE) {
-        return IOS_ERROR(IOS_E_INVALID_STATE);
-    }
-    kernel_stack_top = process->kernel_stack_address
-        + process->kernel_stack_pages * IOS_PAGE_SIZE;
-    kernel_stack_top &= ~UINT64_C(0xf);
-    virtual_address_space_activate(&process->address_space);
-    x86_64_gdt_set_kernel_stack(kernel_stack_top);
-    syscall_set_kernel_stack(kernel_stack_top);
-    return IOS_OK;
+    return process_activate(process);
 }
 
 ios_status syscall_register(ios_u64 number, ios_syscall_handler handler)
@@ -78,7 +66,8 @@ static ios_status abi_info(
         .major = IOS_SYSCALL_ABI_MAJOR,
         .minor = IOS_SYSCALL_ABI_MINOR,
         .feature_bits = IOS_SYSCALL_FEATURE_VERSIONED_STRUCTURES
-            | IOS_SYSCALL_FEATURE_SAFE_USER_COPY | IOS_SYSCALL_FEATURE_PROCESS_HANDLES,
+            | IOS_SYSCALL_FEATURE_SAFE_USER_COPY | IOS_SYSCALL_FEATURE_PROCESS_HANDLES
+            | IOS_SYSCALL_FEATURE_IPC,
         .reserved = 0
     };
     return user_copy_to(process, (ios_uptr)*arguments, &information, sizeof(information));
@@ -106,16 +95,34 @@ ios_status syscall_dispatch(
     return handlers[number](process, arguments);
 }
 
-ios_status syscall_dispatch_frame(struct ios_syscall_frame *frame)
+const struct x86_64_user_context *syscall_dispatch_frame(struct ios_syscall_frame *frame)
 {
     struct ios_scheduler_task *task = scheduler_current_task();
+    struct ios_process *origin;
+    ios_status status;
+
     if (frame == NULL || task == NULL || task->kind != IOS_TASK_USER_PROCESS
-        || task->process == NULL
-        || !virtual_user_range_is_valid(frame->user_instruction_pointer, 1)
-        || !virtual_user_range_is_valid(frame->user_stack_pointer, 1)) {
-        return IOS_ERROR(IOS_E_INVALID_STATE);
+        || task->process == NULL) {
+        virtual_kernel_address_space_activate();
+        return NULL;
     }
-    return syscall_dispatch(task->process, frame->number, frame->arguments);
+    origin = task->process;
+    origin->user_context = frame->context;
+    if (!virtual_user_range_is_valid(origin->user_context.instruction_pointer, 1)
+        || !virtual_user_range_is_valid(origin->user_context.stack_pointer, 1)) {
+        (void)scheduler_exit_current(IOS_ERROR(IOS_E_BAD_ADDRESS));
+    } else {
+        status = syscall_dispatch(origin, frame->number, frame->arguments);
+        origin->user_context.rax = (ios_u64)status;
+    }
+
+    task = scheduler_current_task();
+    if (task != NULL && task->kind == IOS_TASK_USER_PROCESS && task->process != NULL
+        && IOS_SUCCEEDED(process_activate(task->process))) {
+        return &task->process->user_context;
+    }
+    virtual_kernel_address_space_activate();
+    return NULL;
 }
 
 ios_status syscall_validate_structure_header(

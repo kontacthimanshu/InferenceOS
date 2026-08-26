@@ -61,6 +61,8 @@ struct ios_cui_fs_context {
     ios_status (*sync)(void *context);
     struct ios_power_controller *power;
     struct ios_cui_diagnostic_binding diagnostic;
+    void *mount_ready_context;
+    ios_status (*mount_ready)(void *context, struct ios_fs_mount *mount);
 };
 
 ios_status ios_cui_fs_context_initialize(
@@ -88,6 +90,11 @@ ios_status ios_cui_fs_set_sync_operation(
 );
 ios_status ios_cui_fs_set_power_controller(
     struct ios_cui_fs_context *context, struct ios_power_controller *power
+);
+ios_status ios_cui_fs_set_mount_ready_operation(
+    struct ios_cui_fs_context *context,
+    void *mount_ready_context,
+    ios_status (*mount_ready)(void *context, struct ios_fs_mount *mount)
 );
 ios_status ios_cui_fs_set_diagnostic_service(
     struct ios_cui_fs_context *context,

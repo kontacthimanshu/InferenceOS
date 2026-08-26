@@ -32,6 +32,8 @@ struct ios_cui_io {
     void *write_context;
     void *command_context;
     const struct ios_cui_command_registry *registry;
+    /* Presentation-owner context; distinct from the shared command service context. */
+    void *shell_context;
 };
 
 typedef ios_status (*ios_cui_command_handler)(

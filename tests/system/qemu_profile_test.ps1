@@ -125,6 +125,19 @@ foreach ($marker in @('EarlySerialReady','CuiReady','GuiReady','GuiUnavailable',
     }
 }
 
+$controlParameters = $headlessParameters.Clone()
+$controlParameters.TestControlPort = 43127
+$control = Invoke-Profile $controlParameters
+if (-not $control.TestControl.Enabled -or
+    $control.TestControl.ProtocolVersion -ne 1 -or
+    $control.TestControl.Transport -cne 'com2-tcp' -or
+    $control.TestControl.Port -ne 43127) {
+    throw 'The profile does not expose the versioned COM2 test-control endpoint.'
+}
+Assert-ArgumentPair ([string[]]$control.Arguments) '-chardev' `
+    'socket,id=inferenceos-test-control,host=127.0.0.1,port=43127,server=on,wait=off'
+Assert-ArgumentPair ([string[]]$control.Arguments) '-serial' 'chardev:inferenceos-test-control'
+
 $runtimeVars = Join-Path $headlessWork 'OVMF_VARS.fd'
 if (-not [System.IO.File]::Exists($runtimeVars) -or
     -not [System.Linq.Enumerable]::SequenceEqual([System.IO.File]::ReadAllBytes($runtimeVars), [byte[]](9,10,11,12))) {
@@ -168,10 +181,12 @@ $report = [ordered]@{
         'separate read-only OVMF code and copied writable variables',
         'raw ESP plus raw writeback virtio-blk persistent disk',
         'headless serial-file and visible serial-stdio modes',
+        'versioned COM2 TCP test-control transport with COM1 evidence isolation',
         'QEMU key/value path commas escaped by doubling'
     )
     cases = @(
         [ordered]@{ name = 'headless-path-portability'; passed = $true },
+        [ordered]@{ name = 'test-control-transport'; passed = $true },
         [ordered]@{ name = 'ovmf-variable-lifecycle'; passed = $true },
         [ordered]@{ name = 'visible-console'; passed = $true }
     )

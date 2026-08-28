@@ -20,6 +20,10 @@ const struct efi_guid ios_efi_graphics_output_guid = {
     UINT32_C(0x9042a9de), UINT16_C(0x23dc), UINT16_C(0x4a38),
     { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a }
 };
+const struct efi_guid ios_efi_device_path_guid = {
+    UINT32_C(0x09576e91), UINT16_C(0x6d3f), UINT16_C(0x11d2),
+    { 0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b }
+};
 const struct efi_guid ios_efi_acpi_20_table_guid = {
     UINT32_C(0x8868e871), UINT16_C(0xe4f1), UINT16_C(0x11d3),
     { 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 }
@@ -164,6 +168,35 @@ static bool configure_graphics(struct ios_boot_info *information)
     return false;
 }
 
+static void capture_boot_partition_guid(
+    struct efi_boot_services *services, efi_handle device_handle,
+    ios_u8 partition_guid[16]
+)
+{
+    struct efi_device_path_protocol *node = NULL;
+
+    if (services == NULL || device_handle == NULL || partition_guid == NULL
+        || EFI_STATUS_ERROR(services->handle_protocol(device_handle,
+            (struct efi_guid *)&ios_efi_device_path_guid, (void **)&node))) {
+        return;
+    }
+    for (ios_size count = 0; node != NULL && count < 64; ++count) {
+        const ios_u16 length = (ios_u16)(node->length[0] | ((ios_u16)node->length[1] << 8));
+
+        if (length < sizeof(*node)) return;
+        if (node->type == 0x04 && node->subtype == 0x01
+            && length >= sizeof(struct efi_hard_drive_device_path)) {
+            const struct efi_hard_drive_device_path *hard_drive = (const void *)node;
+            if (hard_drive->signature_type == 0x02) {
+                memcpy(partition_guid, hard_drive->partition_signature, 16);
+                return;
+            }
+        }
+        if (node->type == 0x7f) return;
+        node = (void *)((ios_u8 *)node + length);
+    }
+}
+
 static void seal_boot_info(struct ios_boot_info *information)
 {
     ios_u8 sum = 0; information->checksum = 0;
@@ -203,9 +236,15 @@ efi_status IOS_UEFI_API IOS_SECTION(".text.entry") efi_main(
     if (!EFI_STATUS_ERROR(firmware_status)) firmware_status = filesystem->open_volume(filesystem, &environment.root);
     if (EFI_STATUS_ERROR(firmware_status)) { diagnostic("cannot open the ESP"); return firmware_status; }
     status = read_file(&environment, kernel_path, &kernel_image, &kernel_size);
-    if (IOS_SUCCEEDED(status)) status = ios_uefi_elf64_load_kernel(kernel_image, kernel_size,
+    if (IOS_FAILED(status)) {
+        diagnostic("kernel.elf could not be read from the ESP"); return EFI_NOT_FOUND;
+    }
+    status = ios_uefi_elf64_load_kernel(kernel_image, kernel_size,
         allocate_image, &environment, &kernel_entry, &kernel_base, &kernel_bytes);
-    if (IOS_FAILED(status)) { diagnostic("kernel ELF64 validation or loading failed"); return EFI_LOAD_ERROR; }
+    if (IOS_FAILED(status)) {
+        diagnostic("kernel ELF64 validation or fixed-address allocation failed");
+        return EFI_LOAD_ERROR;
+    }
     status = read_file(&environment, manifest_path, &manifest, &manifest_size);
     if (IOS_FAILED(status)) { diagnostic("system-module manifest is missing"); return EFI_NOT_FOUND; }
     firmware_status = environment.services->allocate_pool(EFI_LOADER_DATA,
@@ -223,6 +262,9 @@ efi_status IOS_UEFI_API IOS_SECTION(".text.entry") efi_main(
     }
     boot->module_descriptors_address = (ios_uptr)modules; boot->module_descriptor_count = (ios_u32)module_count;
     boot->module_descriptor_size = sizeof(*modules); boot->esp_device_handle = (ios_uptr)loaded_image->device_handle;
+    boot->runtime_services = (ios_uptr)table->runtime_services;
+    capture_boot_partition_guid(
+        environment.services, loaded_image->device_handle, boot->boot_partition_guid);
     if (!configure_graphics(boot) || gui_unavailable) {
         boot->flags |= IOS_BOOT_FLAG_GUI_UNAVAILABLE;
         boot->framebuffer_address = 0; boot->framebuffer_size = 0;

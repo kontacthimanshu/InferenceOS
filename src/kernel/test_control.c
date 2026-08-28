@@ -59,6 +59,19 @@ static bool copy_token(
     return true;
 }
 
+static bool valid_action(const char *action)
+{
+    ios_size index = 0;
+    if (action == NULL || *action < 'a' || *action > 'z') return false;
+    while (action[index] != '\0') {
+        const char character = action[index++];
+        if (!((character >= 'a' && character <= 'z')
+              || (character >= '0' && character <= '9')
+              || character == '_')) return false;
+    }
+    return true;
+}
+
 static ios_status parse_request(
     const char *line, struct ios_test_control_request *request
 )
@@ -70,9 +83,11 @@ static ios_status parse_request(
         || !parse_u32(&cursor, &version)
         || version != IOS_TEST_CONTROL_PROTOCOL_VERSION
         || !parse_u32(&cursor, &request->sequence)
+        || request->sequence == 0
         || !copy_token(
             &cursor, request->action, sizeof(request->action), false
         )
+        || !valid_action(request->action)
         || !copy_token(
             &cursor, request->argument, sizeof(request->argument), true
         )) {
@@ -117,6 +132,14 @@ ios_status ios_test_control_poll(
         if (character == '\r') continue;
         if (character != '\n') {
             if (control->discarding_line) continue;
+            if ((character < 0x20 || character > 0x7e) && character != '\t') {
+                control->line_length = 0;
+                control->discarding_line = true;
+                if (IOS_SUCCEEDED(first_error)) {
+                    first_error = IOS_ERROR(IOS_E_PROTOCOL);
+                }
+                continue;
+            }
             if (control->line_length == IOS_TEST_CONTROL_LINE_CAPACITY) {
                 control->line_length = 0;
                 control->discarding_line = true;
@@ -135,7 +158,12 @@ ios_status ios_test_control_poll(
         status = parse_request(control->line, &request);
         control->line_length = 0;
         if (IOS_SUCCEEDED(status)) {
-            status = control->dispatch(control->dispatch_context, &request);
+            if (request.sequence <= control->last_sequence) {
+                status = IOS_ERROR(IOS_E_PROTOCOL);
+            } else {
+                control->last_sequence = request.sequence;
+                status = control->dispatch(control->dispatch_context, &request);
+            }
         }
         if (IOS_FAILED(status) && IOS_SUCCEEDED(first_error)) first_error = status;
     }

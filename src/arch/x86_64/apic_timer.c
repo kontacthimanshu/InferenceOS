@@ -1,4 +1,5 @@
 #include <inferenceos/arch/io.h>
+#include <inferenceos/arch/hyperv.h>
 #include <inferenceos/arch/platform.h>
 
 enum {
@@ -13,6 +14,7 @@ enum {
     APIC_TIMER_PERIODIC = 0x20000,
     APIC_DIVIDE_BY_16 = 0x3,
     ACPI_PM_TIMER_HZ = 3579545,
+    HYPERV_REFERENCE_TICKS_PER_MS = 10000,
     CALIBRATION_TIMEOUT_READS = 20000000
 };
 
@@ -47,14 +49,26 @@ ios_status x86_64_apic_timer_initialize(const struct x86_64_platform_info *platf
 {
     const ios_u32 target_pm_ticks =
         (ACPI_PM_TIMER_HZ * X86_64_SCHEDULER_QUANTUM_MS + 999U) / 1000U;
+    const ios_u64 target_hyperv_ticks =
+        (ios_u64)HYPERV_REFERENCE_TICKS_PER_MS * X86_64_SCHEDULER_QUANTUM_MS;
     ios_u32 start;
     ios_u32 reads = 0;
     ios_u32 elapsed;
+    ios_u64 hyperv_start = 0;
+    ios_u64 hyperv_current = 0;
+    bool use_pm_timer;
+    ios_status status;
 
-    if (platform == NULL || platform->local_apic_address == 0
-        || platform->pm_timer_port == 0
-        || (platform->pm_timer_width != 24 && platform->pm_timer_width != 32)) {
+    if (platform == NULL || platform->local_apic_address == 0) {
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    use_pm_timer = platform->pm_timer_port != 0
+        && (platform->pm_timer_width == 24 || platform->pm_timer_width == 32);
+    if (!use_pm_timer) {
+        status = x86_64_hyperv_read_reference_time(&hyperv_start);
+        if (IOS_FAILED(status)) {
+            return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+        }
     }
     local_apic = (volatile ios_u32 *)platform->local_apic_address;
     if ((ios_u8)(apic_read(APIC_ID) >> 24) != platform->bootstrap_apic_id) {
@@ -65,11 +79,22 @@ ios_status x86_64_apic_timer_initialize(const struct x86_64_platform_info *platf
     apic_write(APIC_TIMER_DIVIDE, APIC_DIVIDE_BY_16);
     apic_write(APIC_LVT_TIMER, UINT32_C(1) << 16);
     apic_write(APIC_TIMER_INITIAL, UINT32_MAX);
-    start = pm_timer_read(platform);
-    do {
-        elapsed = pm_timer_elapsed(start, pm_timer_read(platform), platform->pm_timer_width);
-        ++reads;
-    } while (elapsed < target_pm_ticks && reads < CALIBRATION_TIMEOUT_READS);
+    if (use_pm_timer) {
+        start = pm_timer_read(platform);
+        do {
+            elapsed = pm_timer_elapsed(start, pm_timer_read(platform), platform->pm_timer_width);
+            ++reads;
+        } while (elapsed < target_pm_ticks && reads < CALIBRATION_TIMEOUT_READS);
+    } else {
+        do {
+            status = x86_64_hyperv_read_reference_time(&hyperv_current);
+            if (IOS_FAILED(status)) break;
+            ++reads;
+        } while (hyperv_current - hyperv_start < target_hyperv_ticks
+            && reads < CALIBRATION_TIMEOUT_READS);
+        elapsed = status == IOS_OK && hyperv_current - hyperv_start >= target_hyperv_ticks
+            ? target_pm_ticks : 0;
+    }
     if (elapsed < target_pm_ticks) {
         apic_write(APIC_TIMER_INITIAL, 0);
         local_apic = NULL;

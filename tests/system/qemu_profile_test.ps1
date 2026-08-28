@@ -72,6 +72,10 @@ function Assert-ArgumentPair([string[]]$Arguments, [string]$Option, [string]$Val
 $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
 $launcher = Join-Path $root 'tools/test/run_inferenceos.ps1'
 if (-not [System.IO.File]::Exists($launcher)) { throw "QEMU launcher '$launcher' is missing." }
+$diskBuilder = Join-Path $root 'tools/image/create_persistent_disk.ps1'
+if (-not [System.IO.File]::Exists($diskBuilder)) {
+    throw "Persistent-disk builder '$diskBuilder' is missing."
+}
 $artifactRoot = if ([string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
     Join-Path $root 'build/system/qemu-profile'
 } else {
@@ -87,8 +91,7 @@ $serial = Join-Path $caseRoot 'serial output.log'
 [System.IO.File]::WriteAllBytes($esp, [byte[]](1,2,3,4))
 [System.IO.File]::WriteAllBytes($ovmfCode, [byte[]](5,6,7,8))
 [System.IO.File]::WriteAllBytes($ovmfVars, [byte[]](9,10,11,12))
-$diskStream = [System.IO.File]::Open($disk, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
-try { $diskStream.SetLength(50000000000) } finally { $diskStream.Dispose() }
+& $diskBuilder -OutputPath $disk -SizeBytes ([uint64]50000000000) -Force | Out-Null
 
 $common = @{
     EspPath = $esp

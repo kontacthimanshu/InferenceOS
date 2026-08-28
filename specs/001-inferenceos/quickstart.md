@@ -12,10 +12,16 @@ that the greenfield repository already contains these commands.
 - PowerShell 7 on Windows or the documented equivalent wrapper on other hosts
 - At least enough host space for sparse images and retained failure artifacts
 
-On Windows, the implementation MUST provide the idempotent checked-in bootstrap described by T001:
+On Windows, run the idempotent checked-in bootstrap described by T001:
 
 ```powershell
 pwsh tools/bootstrap/wsl-ubuntu.ps1
+```
+
+On native Ubuntu, run the checked-in Linux entry point instead:
+
+```bash
+./tools/bootstrap/wsl-ubuntu.sh
 ```
 
 The wrapper invokes `tools/bootstrap/wsl-ubuntu.sh`, reads pinned versions from
@@ -24,15 +30,30 @@ sourceable project environment file without modifying a user's global shell prof
 The authoritative version matrix is fixed by R2 in `research.md`; the bootstrap must report and
 reject any silent version substitution.
 
+After bootstrapping, run every command below inside Ubuntu (native or WSL), from the repository
+root, after sourcing the generated environment. On a default WSL installation:
+
+```bash
+source "$HOME/.local/share/inferenceos/tools/environment.sh"
+./tools/bootstrap/wsl-ubuntu.sh --check
+```
+
+Do not reuse a build directory between Windows and WSL because CMake caches contain host-specific
+absolute paths.
+
 ## 1. Configure and Validate Both Compilers
 
-```powershell
+```bash
 cmake --preset gcc-debug
 cmake --build --preset gcc-debug
+cmake --preset gcc-host-debug
+cmake --build --preset gcc-host-debug
 ctest --preset gcc-host
 
 cmake --preset clang-debug
 cmake --build --preset clang-debug
+cmake --preset clang-host-debug
+cmake --build --preset clang-host-debug
 ctest --preset clang-host
 ```
 
@@ -42,7 +63,7 @@ no undeclared use.
 
 ## 2. Build Reference Images
 
-```powershell
+```bash
 cmake --build --preset gcc-debug --target inferenceos-image
 cmake --build --preset gcc-debug --target inferenceos-test-disk
 ```
@@ -56,7 +77,7 @@ Expected outputs under the build directory:
 
 ## 3. Run Fast Filesystem Integration Tests
 
-```powershell
+```bash
 ctest --preset gcc-integration
 ```
 
@@ -66,7 +87,7 @@ corruption class pass against memory and sparse-file block backends.
 
 ## 4. Boot to CUI and Start GUI
 
-```powershell
+```bash
 cmake --build --preset gcc-debug --target test-boot
 cmake --build --preset gcc-debug --target test-gui
 ```
@@ -91,6 +112,12 @@ gui
 shutdown
 ```
 
+Run that persistent-disk scenario, including 20 reboot cycles, with:
+
+```bash
+cmake --build --preset gcc-debug --target test-reboot-persistence
+```
+
 After a fresh boot using the same persistent disk, it MUST remount, read the expected bytes from
 both the standalone CUI and GUI terminal, demonstrate that a GUI-terminal mutation is visible from
 the standalone CUI, show `REPORT` without `.TXT` in ordinary CUI and File Explorer views, show the
@@ -100,7 +127,7 @@ correct icon, and expose the extension/hash only in explicitly authorized diagno
 
 ## 6. Run Fault and Corruption Matrix
 
-```powershell
+```bash
 ctest --preset gcc-fault
 ```
 
@@ -111,7 +138,7 @@ cause out-of-volume access.
 
 ## 7. Validate Application Metadata Boundaries
 
-```powershell
+```bash
 ctest --preset gcc-contract
 ```
 
@@ -121,8 +148,8 @@ handles fail; diagnostic authority remains separate.
 
 ## 8. Run Registry Research Gate
 
-```powershell
-cmake --build --preset gcc-release --target benchmark-registry
+```bash
+cmake --build --preset gcc-debug --target benchmark-registry-qemu
 ```
 
 Expected: matched enabled/disabled runs report corpus seed/checksum, build and QEMU versions,

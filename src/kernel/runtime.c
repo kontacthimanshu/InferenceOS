@@ -6,14 +6,18 @@
 #include <inferenceos/arch/pci.h>
 #include <inferenceos/block.h>
 #include <inferenceos/cui_fs.h>
+#include <inferenceos/drivers/framebuffer.h>
 #include <inferenceos/drivers/ps2.h>
+#include <inferenceos/drivers/hyperv/platform.h>
 #include <inferenceos/drivers/serial.h>
-#include <inferenceos/drivers/virtio_blk.h>
 #include <inferenceos/file_view.h>
+#include <inferenceos/extension_search.h>
+#include <inferenceos/fs/file_service.h>
 #include <inferenceos/fs/sync.h>
 #include <inferenceos/gui/file_explorer.h>
 #include <inferenceos/gui_view.h>
 #include <inferenceos/ipc.h>
+#include <inferenceos/memory.h>
 #include <inferenceos/power.h>
 #include <inferenceos/process.h>
 #include <inferenceos/runtime.h>
@@ -46,15 +50,20 @@ struct ios_kernel_runtime_state {
     struct ios_block_cache cache;
     struct ios_block_cache_entry cache_entries[IOS_BLOCK_CACHE_MAX_ENTRIES];
     struct ios_fs_sync sync;
+    struct ios_fs_file_service file_service;
+    ios_uptr file_service_fat_address;
+    ios_u64 file_service_fat_pages;
     struct ios_vfs_mount_registry mounts;
     struct ios_fs_mount filesystem;
     struct ios_vfs_path_context path;
     struct ios_cui_fs_context cui_filesystem;
     struct ios_power_controller power;
     struct ios_type_catalog type_catalog;
+    ios_type_icon_capability generic_file_capability;
     struct ios_application_binding_registry bindings;
     struct ios_type_capability_service type_capabilities;
     struct ios_file_view_service file_view;
+    struct ios_extension_search_service extension_search;
     struct ios_gui_view_service gui_view;
     struct ios_shell_service shell_service;
     struct ios_shell_runtime shell;
@@ -67,6 +76,7 @@ struct ios_kernel_runtime_state {
     struct ios_process *role_process[IOS_MODULE_ROLE_TEST_APPLICATION + 1];
     ios_handle diagnostic_handle;
     struct ios_psf2_font font;
+    struct ios_graphics_text_console framebuffer_cui;
     struct ios_test_control test_control;
     bool test_control_ready;
     bool storage_ready;
@@ -119,8 +129,12 @@ static ios_status runtime_sync(void *context)
 
 static void runtime_write(const char *text, void *context)
 {
-    (void)context;
+    struct ios_kernel_runtime_state *state = context;
+
     serial_write(text);
+    if (state != NULL && state->framebuffer_cui.active && !state->shell.gui_running) {
+        (void)ios_graphics_text_console_write(&state->framebuffer_cui, text);
+    }
 }
 
 static void test_write_u64(ios_u64 value)
@@ -310,9 +324,9 @@ static ios_status test_action_file_explorer(struct ios_kernel_runtime_state *sta
     struct ios_display_safe_entry entries[3];
     ios_size ranks[3];
     const struct ios_display_safe_source_entry sources[3] = {
-        { "REPORT", 7, IOS_INVALID_TYPE_ICON_CAPABILITY, 14,
+        { "REPORT", 7, UINT64_C(1), 14,
           IOS_VFS_FILE_OPEN | IOS_VFS_FILE_READ, 0, IOS_DISPLAY_SAFE_REGULAR_FILE },
-        { "REPORT", 9, IOS_INVALID_TYPE_ICON_CAPABILITY, 15,
+        { "REPORT", 9, UINT64_C(2), 15,
           IOS_VFS_FILE_OPEN | IOS_VFS_FILE_READ, 0, IOS_DISPLAY_SAFE_REGULAR_FILE },
         { "DOCS", 11, IOS_INVALID_TYPE_ICON_CAPABILITY, 0,
           IOS_VFS_FILE_OPEN | IOS_VFS_FILE_ENUMERATE, 0, IOS_DISPLAY_SAFE_DIRECTORY }
@@ -461,6 +475,84 @@ static ios_status test_action_directory(struct ios_kernel_runtime_state *state)
     return IOS_OK;
 }
 
+static ios_status test_action_cui_command_audit(
+    struct ios_kernel_runtime_state *state
+)
+{
+    static const char *const commands[] = {
+        "pwd",
+        "devices",
+        "diskinfo disk0",
+        "fsinfo",
+        "mkdir /CMDTEST",
+        "cd /CMDTEST",
+        "create NOTE.TXT",
+        "write NOTE.TXT \"all commands\"",
+        "append NOTE.TXT \" work\"",
+        "type NOTE.TXT",
+        "dir .",
+        "rename NOTE.TXT FINAL.TXT",
+        "search .txt",
+        "fileinfo FINAL.TXT",
+        "hashinfo FINAL.TXT",
+        "fatinfo FINAL.TXT",
+        "sync",
+        "delete FINAL.TXT",
+        "cd /",
+        "rmdir /CMDTEST",
+        "unmount /",
+        "mount disk0 /",
+        "fsinfo",
+        "help",
+        "version",
+        "clear"
+    };
+    ios_status status;
+
+    if (!state->storage_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    if (vfs_root_mount(&state->mounts) == NULL) {
+        status = test_dispatch_cui(state, "format disk0");
+        if (IOS_FAILED(status)) return status;
+        status = test_dispatch_cui(state, "mount disk0 /");
+        if (IOS_FAILED(status)) return status;
+    }
+    /* A retained QEMU test disk may contain a failed prior audit. Clean only
+     * the audit namespace and leave all unrelated user/test data untouched. */
+    status = test_dispatch_cui(state, "delete /CMDTEST/FINAL.TXT");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/NOTE.TXT");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "rmdir /CMDTEST");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+
+    for (ios_size index = 0; index < IOS_ARRAY_COUNT(commands); ++index) {
+        status = test_dispatch_cui(state, commands[index]);
+        if (IOS_FAILED(status)) return status;
+    }
+    serial_write_line("INFERENCEOS:CUI_COMMAND_AUDIT_PASS");
+    return IOS_OK;
+}
+
+static ios_status test_action_extension_search(
+    struct ios_kernel_runtime_state *state
+)
+{
+    ios_status status;
+    if (!state->storage_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    if (vfs_root_mount(&state->mounts) == NULL) {
+        status = test_dispatch_cui(state, "format disk0");
+        if (IOS_FAILED(status)) return status;
+        status = test_dispatch_cui(state, "mount disk0 /");
+        if (IOS_FAILED(status)) return status;
+    }
+    status = test_dispatch_cui(state, "create /SEARCH.DOC");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_ALREADY_EXISTS)) return status;
+    status = test_dispatch_cui(state, "search .doc");
+    if (IOS_FAILED(status)) return status;
+    serial_write_line("INFERENCEOS:EXTENSION_SEARCH_AUDIT_PASS path=/SEARCH");
+    return IOS_OK;
+}
+
 static ios_status test_action_fault_matrix(void)
 {
     static const char *const faults[] = {
@@ -520,6 +612,10 @@ static ios_status test_control_dispatch(
         status = test_action_persistence(state, request->argument);
     } else if (strcmp(request->action, "directory_interop") == 0) {
         status = test_action_directory(state);
+    } else if (strcmp(request->action, "cui_command_audit") == 0) {
+        status = test_action_cui_command_audit(state);
+    } else if (strcmp(request->action, "extension_search_audit") == 0) {
+        status = test_action_extension_search(state);
     } else if (strcmp(request->action, "fault_matrix") == 0) {
         status = test_action_fault_matrix();
     } else if (strcmp(request->action, "registry_benchmark") == 0) {
@@ -632,14 +728,23 @@ static ios_status filesystem_snapshot(
 )
 {
     struct ios_kernel_runtime_state *state = context;
-    (void)object_identity;
-
+    ios_status status;
     if (state == NULL || source == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     memset(source, 0, sizeof(*source));
-    if (query != IOS_FS_DIAGNOSTIC_QUERY_FILESYSTEM) {
-        return IOS_ERROR(IOS_E_NOT_SUPPORTED);
-    }
     source->registry_health = IOS_FS_DIAGNOSTIC_REGISTRY_DISABLED;
+    source->fat = state->file_service.fat;
+    source->fat_entry_count = state->file_service.fat_entry_count;
+    source->free_space_known = state->file_service.initialized;
+    source->free_bytes = ios_fs_file_service_free_bytes(&state->file_service);
+    if (query == IOS_FS_DIAGNOSTIC_QUERY_FILESYSTEM) return IOS_OK;
+    status = ios_fs_file_service_get_record(
+        &state->file_service, object_identity,
+        &source->primary, &source->companion,
+        &source->primary_record_location, &source->companion_record_location,
+        &source->has_companion
+    );
+    if (IOS_FAILED(status)) return status;
+    source->has_primary = true;
     return IOS_OK;
 }
 
@@ -662,8 +767,35 @@ static ios_status resolve_diagnostic_object(
 static ios_status runtime_mount_ready(void *context, struct ios_fs_mount *mount)
 {
     struct ios_kernel_runtime_state *state = context;
+    const ios_u64 fat_bytes = (ios_u64)mount->geometry.fat_sectors * IOS_FS_SECTOR_SIZE;
+    const ios_u64 fat_pages = (fat_bytes + IOS_PAGE_SIZE - 1U) / IOS_PAGE_SIZE;
     ios_status status;
 
+    if (state->sync.cache == NULL) {
+        status = ios_fs_sync_initialize(&state->sync, &state->cache);
+        if (IOS_FAILED(status)) return status;
+    }
+    if (fat_pages == 0 || fat_pages > SIZE_MAX / IOS_PAGE_SIZE) {
+        return IOS_ERROR(IOS_E_OVERFLOW);
+    }
+    if (state->file_service_fat_pages < fat_pages) {
+        ios_uptr allocation;
+        status = physical_allocate_pages(fat_pages, 1, &allocation);
+        if (IOS_FAILED(status)) return status;
+        if (state->file_service_fat_address != 0) {
+            (void)physical_free_pages(
+                state->file_service_fat_address, state->file_service_fat_pages
+            );
+        }
+        state->file_service_fat_address = allocation;
+        state->file_service_fat_pages = fat_pages;
+    }
+    status = ios_fs_file_service_initialize(
+        &state->file_service, mount, &state->sync,
+        (ios_u32 *)state->file_service_fat_address,
+        (ios_size)(state->file_service_fat_pages * IOS_PAGE_SIZE)
+    );
+    if (IOS_FAILED(status)) return status;
     status = vfs_mount_configure_unmount(
         &mount->vfs, &state->sync,
         ios_fs_sync_barrier_operation, ios_fs_sync_invalidate_operation
@@ -672,6 +804,117 @@ static ios_status runtime_mount_ready(void *context, struct ios_fs_mount *mount)
     status = vfs_path_context_initialize(&state->path, &mount->vfs);
     if (IOS_SUCCEEDED(status)) state->path_ready = true;
     return status;
+}
+
+static ios_status runtime_file_create(void *context, const char *path)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    return IOS_FAILED(status) ? status
+        : ios_fs_file_service_create(&state->file_service, normalized);
+}
+
+static ios_status runtime_file_write(
+    void *context, const char *path, const void *bytes, ios_size length
+)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    return IOS_FAILED(status) ? status
+        : ios_fs_file_service_replace(&state->file_service, normalized, bytes, length);
+}
+
+static ios_status runtime_file_append(
+    void *context, const char *path, const void *bytes, ios_size length
+)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    return IOS_FAILED(status) ? status
+        : ios_fs_file_service_append(&state->file_service, normalized, bytes, length);
+}
+
+static ios_status runtime_file_type(
+    void *context, const char *path, ios_cui_write output, void *output_context
+)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_u32 offset = 0;
+    bool complete = false;
+    ios_status status;
+    if (state == NULL || output == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (!state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    if (IOS_FAILED(status)) return status;
+    while (!complete) {
+        char bytes[257];
+        ios_size transferred;
+        status = ios_fs_file_service_read(
+            &state->file_service, normalized, offset, bytes, sizeof(bytes) - 1U,
+            &transferred, &complete
+        );
+        if (IOS_FAILED(status)) return status;
+        bytes[transferred] = '\0';
+        if (transferred != 0) output(bytes, output_context);
+        if (transferred == 0 && !complete) return IOS_ERROR(IOS_E_PROTOCOL);
+        if (transferred > UINT32_MAX - offset) return IOS_ERROR(IOS_E_OVERFLOW);
+        offset += (ios_u32)transferred;
+    }
+    return IOS_OK;
+}
+
+static ios_status runtime_file_rename(
+    void *context, const char *source, const char *destination
+)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized_source[IOS_VFS_PATH_CAPACITY];
+    char normalized_destination[IOS_VFS_PATH_CAPACITY];
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, source,
+        normalized_source, sizeof(normalized_source)
+    );
+    if (IOS_FAILED(status)) return status;
+    status = vfs_path_normalize(
+        state->path.current_directory, destination,
+        normalized_destination, sizeof(normalized_destination)
+    );
+    return IOS_FAILED(status) ? status : ios_fs_file_service_rename(
+        &state->file_service, normalized_source, normalized_destination
+    );
+}
+
+static ios_status runtime_file_remove(void *context, const char *path)
+{
+    struct ios_kernel_runtime_state *state = context;
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    return IOS_FAILED(status) ? status
+        : ios_fs_file_service_remove(&state->file_service, normalized);
 }
 
 static ios_status directory_enumerate(
@@ -699,7 +942,8 @@ static ios_status directory_enumerate(
         const struct ios_display_safe_source_entry safe = {
             .base_name = source[index].display_base_name,
             .object_handle = source[index].object_identity,
-            .type_icon_capability = IOS_INVALID_TYPE_ICON_CAPABILITY,
+            .type_icon_capability = source[index].kind == IOS_VFS_OBJECT_DIRECTORY
+                ? IOS_INVALID_TYPE_ICON_CAPABILITY : state->generic_file_capability,
             .byte_size = source[index].byte_size,
             .allowed_operations = source[index].allowed_operations,
             .generic_attributes = source[index].generic_attributes,
@@ -741,21 +985,21 @@ static ios_status directory_create(void *context, const char *path)
 static ios_status directory_remove(void *context, const char *path)
 {
     struct ios_kernel_runtime_state *state = context;
-    return state != NULL && state->path_ready
-        ? vfs_remove_directory(&state->path, path) : IOS_ERROR(IOS_E_INVALID_STATE);
-}
-
-static ios_status q35_power_transition(void *context, enum ios_power_action action)
-{
-    (void)context;
-    if (action == IOS_POWER_REBOOT) {
-        x86_64_port_write8(UINT16_C(0x0cf9), UINT8_C(0x06));
-    } else if (action == IOS_POWER_SHUTDOWN) {
-        x86_64_port_write16(UINT16_C(0x0604), UINT16_C(0x2000));
-    } else {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    ios_size length;
+    ios_status status;
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    status = vfs_path_normalize(
+        state->path.current_directory, path, normalized, sizeof(normalized)
+    );
+    if (IOS_FAILED(status)) return status;
+    length = strlen(normalized);
+    if (strncmp(state->path.current_directory, normalized, length) == 0
+        && (state->path.current_directory[length] == '\0'
+            || state->path.current_directory[length] == '/')) {
+        return IOS_ERROR(IOS_E_BUSY);
     }
-    x86_64_halt_forever();
+    return vfs_remove_directory(&state->path, normalized);
 }
 
 static ios_status start_file_explorer_view(struct ios_kernel_runtime_state *state)
@@ -828,6 +1072,17 @@ static void route_file_explorer_pointer(
     }
 }
 
+static void return_from_gui_to_cui(struct ios_kernel_runtime_state *state)
+{
+    ios_shell_stop_gui(&state->shell, "gui_stopped: user request");
+    state->file_explorer_view_running = false;
+    if (state->framebuffer_cui.active) {
+        (void)ios_graphics_text_console_clear(&state->framebuffer_cui);
+    }
+    ios_cui_console_prompt(&state->shell.standalone_console);
+    serial_write_line("INFERENCEOS:GUI_CLOSED CUI_READY");
+}
+
 static ios_status initialize_modules_and_services(struct ios_kernel_runtime_state *state)
 {
     const struct ios_system_module_descriptor *modules =
@@ -855,7 +1110,16 @@ static ios_status initialize_modules_and_services(struct ios_kernel_runtime_stat
     if (shell_process == NULL) return IOS_ERROR(IOS_E_NOT_FOUND);
 
     status = ios_file_view_service_initialize(
-        &state->file_view, &state->mounts, &state->type_catalog
+        &state->file_view, &state->mounts, &state->type_catalog,
+        state->generic_file_capability
+    );
+    if (IOS_FAILED(status)) return status;
+    status = ios_extension_search_service_initialize(
+        &state->extension_search, &state->mounts
+    );
+    if (IOS_FAILED(status)) return status;
+    status = ios_cui_fs_set_extension_search_service(
+        &state->cui_filesystem, &state->extension_search, shell_process
     );
     if (IOS_FAILED(status)) return status;
     status = ios_gui_view_service_initialize(&state->gui_view, NULL, NULL);
@@ -905,27 +1169,76 @@ static const struct ios_psf2_font *open_runtime_font(struct ios_kernel_runtime_s
     const ios_uptr end = (ios_uptr)__inferenceos_font_end;
 
     if (start == 0 || end <= start
-        || IOS_FAILED(ios_psf2_open((const void *)start, end - start, &state->font))) {
+        || IOS_FAILED(ios_alpha4_open((const void *)start, end - start, &state->font))) {
         return NULL;
     }
     return &state->font;
 }
 
+static const struct ios_psf2_font *initialize_framebuffer_cui(
+    struct ios_kernel_runtime_state *state
+)
+{
+    const struct ios_psf2_font *font = open_runtime_font(state);
+    struct ios_graphics_surface framebuffer;
+
+    if (font == NULL
+        || IOS_FAILED(ios_gop_framebuffer_open(state->boot_info, &framebuffer))
+        || IOS_FAILED(ios_graphics_text_console_initialize(
+            &state->framebuffer_cui,
+            framebuffer,
+            font,
+            UINT32_C(0x00f0f0f0),
+            UINT32_C(0x00101010)
+        ))) {
+        serial_write_line("INFERENCEOS:FRAMEBUFFER_CUI_UNAVAILABLE");
+        return font;
+    }
+
+    serial_write_line("INFERENCEOS:FRAMEBUFFER_CUI_READY");
+    return font;
+}
+
 ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
 {
+    static const struct {
+        ios_u64 identity;
+        enum ios_presentation_icon icon;
+    } file_type_icons[] = {
+        { UINT64_C(0x545854), IOS_ICON_TEXT },        /* TXT */
+        { UINT64_C(0x444f43), IOS_ICON_TEXT },        /* DOC */
+        { UINT64_C(0x4c4f47), IOS_ICON_TEXT },        /* LOG */
+        { UINT64_C(0x4d44), IOS_ICON_TEXT },          /* MD */
+        { UINT64_C(0x435356), IOS_ICON_TEXT },        /* CSV */
+        { UINT64_C(0x504e47), IOS_ICON_IMAGE },       /* PNG */
+        { UINT64_C(0x4a5047), IOS_ICON_IMAGE },       /* JPG */
+        { UINT64_C(0x424d50), IOS_ICON_IMAGE },       /* BMP */
+        { UINT64_C(0x474946), IOS_ICON_IMAGE },       /* GIF */
+        { UINT64_C(0x49434f), IOS_ICON_IMAGE },       /* ICO */
+        { UINT64_C(0x415050), IOS_ICON_APPLICATION }, /* APP */
+        { UINT64_C(0x455845), IOS_ICON_APPLICATION }, /* EXE */
+        { UINT64_C(0x42494e), IOS_ICON_APPLICATION }  /* BIN */
+    };
     struct ios_kernel_runtime_state *state = &runtime_state;
     ios_type_icon_capability ignored_capability;
+    const struct ios_psf2_font *runtime_font;
     const struct ios_cui_directory_operations directory_operations = {
         directory_enumerate, directory_change_current, directory_get_current,
         directory_create, directory_remove
     };
+    const struct ios_cui_file_operations file_operations = {
+        runtime_file_create, runtime_file_write, runtime_file_append,
+        runtime_file_type, runtime_file_rename, runtime_file_remove
+    };
     ios_status status;
+    ios_status block_status;
 
     if (boot_info == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     memset(state, 0, sizeof(*state));
     state->boot_info = boot_info;
     state->diagnostic_handle = IOS_INVALID_HANDLE;
 
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE scheduler");
     status = scheduler_initialize(runtime_idle, state);
     if (IOS_FAILED(status)) return status;
     status = scheduler_platform_initialize(
@@ -934,6 +1247,7 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
     if (IOS_FAILED(status)) return status;
     status = scheduler_set_tick_function(runtime_tick, state);
     if (IOS_FAILED(status)) return status;
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE process-services");
     status = process_system_initialize();
     if (IOS_FAILED(status)) return status;
     status = syscall_initialize();
@@ -941,14 +1255,41 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
     status = ipc_initialize();
     if (IOS_FAILED(status)) return status;
 
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE platform-devices");
     input_queue_initialize(&state->input, IOS_RUNTIME_FRAMEBUFFER_WIDTH, IOS_RUNTIME_FRAMEBUFFER_HEIGHT);
     ps2_keyboard_initialize(&state->keyboard, &state->input);
     ps2_mouse_initialize(&state->mouse, &state->input);
-    status = ps2_keyboard_hardware_initialize();
-    if (IOS_FAILED(status)) return status;
-    status = ps2_mouse_hardware_initialize();
-    if (IOS_FAILED(status)) return status;
+    block_platform_set_boot_partition_guid(boot_info->boot_partition_guid);
+    block_status = block_platform_initialize_primary(&state->block_device);
+    if (block_platform_is_hyperv()) {
+        status = hyperv_platform_input_initialize(&state->input);
+        if (IOS_FAILED(status)) {
+            serial_write("INFERENCEOS:HYPERV_INPUT_UNAVAILABLE keyboard_stage=");
+            serial_write(hyperv_platform_keyboard_stage());
+            serial_write(" keyboard_status=");
+            serial_write_hex_u64((ios_u64)hyperv_platform_keyboard_status());
+            serial_write(" mouse_stage=");
+            serial_write(hyperv_platform_mouse_stage());
+            serial_write(" mouse_status=");
+            serial_write_hex_u64((ios_u64)hyperv_platform_mouse_status());
+            serial_write("\n");
+        } else {
+            serial_write("INFERENCEOS:HYPERV_INPUT_READY keyboard_stage=");
+            serial_write(hyperv_platform_keyboard_stage());
+            serial_write(" mouse_stage=");
+            serial_write(hyperv_platform_mouse_stage());
+            serial_write(" mouse_status=");
+            serial_write_hex_u64((ios_u64)hyperv_platform_mouse_status());
+            serial_write("\n");
+        }
+    } else {
+        status = ps2_keyboard_hardware_initialize();
+        if (IOS_FAILED(status)) return status;
+        status = ps2_mouse_hardware_initialize();
+        if (IOS_FAILED(status)) return status;
+    }
 
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE filesystem-services");
     vfs_mount_registry_initialize(&state->mounts);
     status = ios_cui_fs_context_initialize(
         &state->cui_filesystem, &state->mounts, &state->filesystem
@@ -962,12 +1303,18 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         &state->cui_filesystem, state, &directory_operations
     );
     if (IOS_FAILED(status)) return status;
-    status = ios_power_initialize(&state->power, state, q35_power_transition);
+    status = ios_cui_fs_set_file_operations(
+        &state->cui_filesystem, state, &file_operations
+    );
+    if (IOS_FAILED(status)) return status;
+    status = ios_power_initialize(
+        &state->power, (void *)boot_info->runtime_services, ios_uefi_power_transition);
     if (IOS_FAILED(status)) return status;
     status = ios_cui_fs_set_power_controller(&state->cui_filesystem, &state->power);
     if (IOS_FAILED(status)) return status;
 
-    status = block_platform_initialize_primary(&state->block_device);
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE storage-publication");
+    status = block_status;
     if (IOS_SUCCEEDED(status)) {
         status = block_cache_initialize(
             &state->cache, &state->block_device,
@@ -1001,7 +1348,7 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         serial_write("INFERENCEOS:STORAGE_UNAVAILABLE status=");
         serial_write_hex_u64((ios_u64)status);
         serial_write(" stage=");
-        serial_write(virtio_blk_pci_last_stage());
+        serial_write(block_platform_last_stage());
         serial_write("\n");
         if (IOS_SUCCEEDED(x86_64_pci_enumerate(
                 functions, IOS_ARRAY_COUNT(functions), &function_count))) {
@@ -1017,38 +1364,44 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         }
     }
 
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE type-services");
     status = ios_type_catalog_initialize(
         &state->type_catalog,
         boot_info->memory_map_key != 0 ? boot_info->memory_map_key : UINT64_C(1)
     );
     if (IOS_FAILED(status)) return status;
     status = ios_type_catalog_register(
-        &state->type_catalog, UINT64_C(1), IOS_ICON_TEXT, &ignored_capability
+        &state->type_catalog, UINT64_MAX, IOS_ICON_GENERIC_FILE,
+        &state->generic_file_capability
     );
     if (IOS_FAILED(status)) return status;
-    status = ios_type_catalog_register(
-        &state->type_catalog, UINT64_C(2), IOS_ICON_IMAGE, &ignored_capability
-    );
-    if (IOS_FAILED(status)) return status;
-    status = ios_type_catalog_register(
-        &state->type_catalog, UINT64_C(3), IOS_ICON_APPLICATION, &ignored_capability
-    );
-    if (IOS_FAILED(status)) return status;
+    for (ios_size index = 0; index < IOS_ARRAY_COUNT(file_type_icons); ++index) {
+        status = ios_type_catalog_register(
+            &state->type_catalog,
+            file_type_icons[index].identity,
+            file_type_icons[index].icon,
+            &ignored_capability
+        );
+        if (IOS_FAILED(status)) return status;
+    }
     ios_application_bindings_initialize(&state->bindings);
     status = ios_type_capability_service_initialize(
         &state->type_capabilities, &state->bindings, &state->type_catalog
     );
     if (IOS_FAILED(status)) return status;
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE system-modules");
     status = initialize_modules_and_services(state);
     if (IOS_FAILED(status)) return status;
 
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE shell");
+    runtime_font = initialize_framebuffer_cui(state);
     status = ios_shell_bootstrap(&state->shell, &(struct ios_shell_config){
         .boot_info = boot_info,
         .shadow = { shadow_pixels, IOS_RUNTIME_FRAMEBUFFER_WIDTH,
                     IOS_RUNTIME_FRAMEBUFFER_HEIGHT, IOS_RUNTIME_FRAMEBUFFER_WIDTH },
         .terminal_surface = { terminal_pixels, IOS_RUNTIME_TERMINAL_WIDTH,
                               IOS_RUNTIME_TERMINAL_HEIGHT, IOS_RUNTIME_TERMINAL_WIDTH },
-        .font = open_runtime_font(state),
+        .font = runtime_font,
         .cui_write = runtime_write,
         .cui_write_context = state,
         .command_context = &state->cui_filesystem,
@@ -1059,6 +1412,7 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         .terminal_module_available = role_is_available(state, IOS_MODULE_ROLE_GUI_TERMINAL)
     });
     if (IOS_FAILED(status)) return status;
+    serial_write_line("INFERENCEOS:RUNTIME_STAGE cui-commands");
     status = ios_cui_register_fs_commands(&state->shell.commands);
     if (IOS_FAILED(status)) return status;
 
@@ -1088,10 +1442,22 @@ void ios_kernel_runtime_step(void)
     if (state->test_control_ready) {
         (void)ios_test_control_poll(&state->test_control, 256);
     }
-    (void)ps2_keyboard_interrupt(&state->keyboard, scheduler_tick_count());
-    (void)ps2_mouse_interrupt(&state->mouse, scheduler_tick_count());
+    if (block_platform_is_hyperv()) {
+        hyperv_platform_input_poll(scheduler_tick_count());
+    } else {
+        (void)ps2_keyboard_interrupt(&state->keyboard, scheduler_tick_count());
+        (void)ps2_mouse_interrupt(&state->mouse, scheduler_tick_count());
+    }
     while (IOS_SUCCEEDED(input_queue_pop(&state->input, &event))) {
         if (state->shell.gui_running) {
+            bool close_requested = false;
+            status = ios_desktop_handle_input(
+                &state->shell.desktop, &event, &close_requested
+            );
+            if (IOS_SUCCEEDED(status) && close_requested) {
+                return_from_gui_to_cui(state);
+                continue;
+            }
             if (event.type == IOS_INPUT_EVENT_KEY) {
                 status = ios_terminal_feed_event(&state->shell.terminal, &event);
                 if (IOS_FAILED(status)) {
@@ -1106,8 +1472,13 @@ void ios_kernel_runtime_step(void)
             }
         } else if (event.type == IOS_INPUT_EVENT_KEY
                    && (event.flags & IOS_INPUT_PRESSED) != 0) {
-            const ios_u32 key = event.text != 0 ? event.text : event.code;
-            (void)ios_cui_console_feed(&state->shell.standalone_console, key);
+            /* Modifier presses carry no text and are state for the following
+             * key, not standalone CUI characters. */
+            if (event.text != 0 || event.code == IOS_KEY_ENTER
+                || event.code == IOS_KEY_BACKSPACE) {
+                const ios_u32 key = event.text != 0 ? event.text : event.code;
+                (void)ios_cui_console_feed(&state->shell.standalone_console, key);
+            }
         }
     }
     if (!state->shell.gui_running) state->file_explorer_view_running = false;

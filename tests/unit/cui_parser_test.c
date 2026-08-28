@@ -28,7 +28,7 @@ static ios_status record_command(
 }
 
 static const struct ios_cui_command write_command = {
-    "write", "record a test write", record_command
+    "write", "record a test write", "write <path> \"<text>\"", record_command
 };
 
 static void test_payload_boundary_and_deterministic_grammar(void)
@@ -118,20 +118,50 @@ static void test_console_edits_reports_errors_and_recovers_prompt(void)
     IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, '\b'), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, 'p'), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, '\r'), IOS_OK);
-    IOS_TEST_ASSERT(strstr(output.bytes, "help - list available commands\n") != NULL);
+    IOS_TEST_ASSERT(strstr(
+        output.bytes, "help [command] - list commands or show command usage\n"
+    ) != NULL);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, 'x'), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, '\n'), IOS_ERROR(IOS_E_NOT_FOUND));
     IOS_TEST_ASSERT(strstr(
         output.bytes, "error: command_not_found: unknown command\n"
     ) != NULL);
+    for (const char *input = "version extra"; *input != '\0'; ++input) {
+        IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, (ios_u8)*input), IOS_OK);
+    }
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_console_feed(&console, '\n'), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "error: invalid_arguments: check command syntax with help\n"
+    ) != NULL);
+    IOS_TEST_ASSERT(strstr(output.bytes, "usage: version\n") != NULL);
     IOS_TEST_ASSERT(console.line_length == 0 && *console.line == '\0');
+}
+
+static void test_help_reports_exact_command_usage(void)
+{
+    struct ios_cui_command_registry registry;
+    struct ios_cui_parsed_line parsed;
+    struct output_buffer output = { 0 };
+    struct ios_cui_io io = { capture_output, &output, NULL, NULL, NULL };
+    ios_cui_command_registry_initialize(&registry);
+    IOS_TEST_ASSERT_STATUS(ios_cui_register_core_commands(&registry), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(ios_cui_command_register(&registry, &write_command), IOS_OK);
+    IOS_TEST_ASSERT(ios_cui_parse_line("help write", &parsed) == IOS_CUI_PARSE_OK);
+    IOS_TEST_ASSERT_STATUS(ios_cui_command_dispatch(&registry, &parsed, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(
+        output.bytes, "write <path> \"<text>\" - record a test write\n"
+    ) == 0);
 }
 
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_payload_boundary_and_deterministic_grammar),
     IOS_TEST_CASE(test_unsupported_syntax_and_nonprintable_input_are_rejected),
     IOS_TEST_CASE(test_shared_registry_dispatches_identically),
-    IOS_TEST_CASE(test_console_edits_reports_errors_and_recovers_prompt)
+    IOS_TEST_CASE(test_console_edits_reports_errors_and_recovers_prompt),
+    IOS_TEST_CASE(test_help_reports_exact_command_usage)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

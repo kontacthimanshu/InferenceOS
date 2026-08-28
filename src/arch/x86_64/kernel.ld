@@ -2,7 +2,13 @@ OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 
-KERNEL_LOAD_ADDRESS = 0x00200000;
+/*
+ * Generation 2 Hyper-V firmware retains allocations in low memory where the
+ * original 2 MiB fixed image was linked. The fixed-base PE loader already
+ * requires and successfully occupies its 0x10000000 image range, so place the
+ * non-relocatable kernel in a separate, page-aligned range 32 MiB above it.
+ */
+KERNEL_LOAD_ADDRESS = 0x12000000;
 PAGE_SIZE = 0x1000;
 
 PHDRS

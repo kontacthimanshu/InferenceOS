@@ -87,15 +87,15 @@ Outputs are created under `build/gcc-debug/artifacts/`:
 - `inferenceos-persistent.raw`, a sparse 64 GiB logical disk;
 - target-generated version-1 `system_modules.json`, packaged modules, `modules.manifest`, and
   `modules.sha256`;
-- the generated, kernel-embedded `fonts/inferenceos-8x16.psf2` asset and its packaged copy;
+- the generated, kernel-embedded `fonts/inferenceos-console-12x24.alpha4` asset and its packaged copy;
 - kernel/application `*.map` and sorted `*.sym` debugging artifacts, plus `BOOTX64.map`;
 - `*.manifest.json` image sidecars containing canonical recipes and content identities.
 
 No `kernel.elf`, application ELF, module definition, or font is accepted as an external packaging
-input. CMake generates the module definition from the named kernel/application targets, generates
-the PSF2 font from project-owned source, checks every packaged hash, and makes `inferenceos-image`
-depend on the complete target graph. The font source and generated PSF2 are MIT-licensed; see
-`assets/fonts/LICENSE.txt` and the repository `LICENSE`.
+input. CMake generates the module definition from the named kernel/application targets, expands the
+checked-in alpha4 font source, checks every packaged hash, and makes `inferenceos-image` depend on
+the complete target graph. The font atlas is derived from JetBrains Mono Regular and remains under
+the SIL Open Font License 1.1; see `assets/fonts/LICENSE.txt` and `assets/fonts/OFL.txt`.
 
 The persistent disk has a large logical size but consumes little physical storage when the host
 filesystem supports sparse files. Copying it with a tool that expands sparse ranges may consume the
@@ -159,19 +159,21 @@ clean-checkout report, then emits deterministic `validation-traceability.json` a
 use `-RequireComplete` only after the complete release matrix has been archived. The equivalent
 CMake entry point is `inferenceos-validation-report`.
 
-Hosted C tests require a native, non-cross-compiling configuration. For GCC:
+Hosted C tests require a native, non-cross-compiling configuration. The checked-in presets keep
+these builds separate from the cross-compiled OS images:
 
 ```bash
-cmake -S . -B build/host-gcc -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_C_COMPILER=gcc -DCMAKE_ASM_COMPILER=gcc \
-  -DINFERENCEOS_BUILD_HOST_TESTS=ON \
-  -DINFERENCEOS_WARNINGS_AS_ERRORS=ON
-cmake --build build/host-gcc
-ctest --test-dir build/host-gcc --output-on-failure --no-tests=error
+cmake --preset gcc-host-debug
+cmake --build --preset gcc-host-debug
+ctest --preset gcc-host
+
+cmake --preset clang-host-debug
+cmake --build --preset clang-host-debug
+ctest --preset clang-host
 ```
 
-Replace both compiler values with `clang` and use `build/host-clang` for the Clang run.
+Use `gcc-integration`, `gcc-fault`, or `gcc-contract` (and the equivalent `clang-*` preset) to run
+the other hosted test groups from the same native build trees.
 
 The complete primary-toolchain QEMU story matrix can be launched after building both images:
 
@@ -185,6 +187,13 @@ The complete primary-toolchain QEMU story matrix can be launched after building 
 The matrix covers boot/GUI/recovery, format/mount, File Explorer, reboot persistence, and directory
 interoperability. It writes `evidence-manifest.json` with suite outcomes and hashed evidence beneath
 `build/qemu-tests/`. A dry-run (`-DryRun`) validates and records the matrix without starting QEMU.
+
+Run the matched registry research workload and generate its report directly from the packaged
+images with:
+
+```bash
+cmake --build --preset gcc-debug --target benchmark-registry-qemu
+```
 
 ## Troubleshooting
 
@@ -202,5 +211,24 @@ interoperability. It writes `evidence-manifest.json` with suite outcomes and has
 InferenceOS project-authored source is available under the MIT License; see `LICENSE`. Bootstrap
 dependencies remain under their respective upstream licenses and are downloaded from the URLs in
 `tools/bootstrap/versions.json`. The project license does not relicense those external tools or
-firmware. The project-authored PSF2 font is also MIT-licensed, with provenance recorded in
-`assets/fonts/LICENSE.txt`.
+firmware. The JetBrains Mono-derived console atlas is licensed under the SIL Open Font License 1.1,
+with provenance in `assets/fonts/LICENSE.txt` and the full terms in `assets/fonts/OFL.txt`.
+
+## Hyper-V Generation 2 images
+
+After `inferenceos-image` succeeds, build the GPT/ESP boot VHDX and blank data VHDX. The scripts
+must run from an elevated Windows PowerShell because they use the Hyper-V and Storage cmdlets; use
+the commands in [hyperv.md](hyperv.md) when the compiler build directory was configured through WSL.
+For a build tree configured natively on Windows, the equivalent target is:
+
+```powershell
+cmake --build --preset gcc-debug --target inferenceos-hyperv-images
+```
+
+Outputs:
+
+- `build/gcc-debug/artifacts/inferenceos-hyperv-boot.vhdx` — GPT with a FAT32 EFI System Partition;
+- `build/gcc-debug/artifacts/inferenceos-hyperv-data.vhdx` — dynamic 64 GiB, unpartitioned, 512-byte
+  logical sectors, intended for whole-disk InferenceOS-FS formatting inside the guest.
+
+See [hyperv.md](hyperv.md) for VM creation, attachment order, boot-disk safety, and persistence tests.

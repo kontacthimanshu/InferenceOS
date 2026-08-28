@@ -128,11 +128,11 @@ static ios_status rmdir_command(
 }
 
 static const struct ios_cui_command directory_descriptors[] = {
-    { "dir", "list display-safe directory entries", dir_command },
-    { "cd", "change the current directory", cd_command },
-    { "pwd", "print the current directory", pwd_command },
-    { "mkdir", "create a directory", mkdir_command },
-    { "rmdir", "remove an empty directory", rmdir_command }
+    { "dir", "list display-safe directory entries", "dir [path]", dir_command },
+    { "cd", "change the current directory", "cd <path>", cd_command },
+    { "pwd", "print the current directory", "pwd", pwd_command },
+    { "mkdir", "create a directory", "mkdir <path>", mkdir_command },
+    { "rmdir", "remove an empty directory", "rmdir <path>", rmdir_command }
 };
 
 ios_status ios_cui_register_directory_commands(struct ios_cui_command_registry *registry)

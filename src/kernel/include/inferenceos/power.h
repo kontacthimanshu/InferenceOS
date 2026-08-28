@@ -47,5 +47,6 @@ ios_status ios_power_add_device(
 ios_status ios_power_request(
     struct ios_power_controller *controller, enum ios_power_action action
 );
+ios_status ios_uefi_power_transition(void *context, enum ios_power_action action);
 
 #endif

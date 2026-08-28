@@ -1,10 +1,14 @@
-InferenceOS 8x16 Bitmap Font
+InferenceOS Console Font
 
-Copyright (c) 2026 InferenceOS contributors
+The InferenceOS console glyph atlas is derived from JetBrains Mono Regular:
+https://github.com/JetBrains/JetBrainsMono
 
-This project-authored bitmap font and its generated PSF2 representation are
-licensed under the MIT License. The full license text is available at the
-repository root in LICENSE.
+Copyright 2020 The JetBrains Mono Project Authors
 
-The glyphs are deliberately simple 5x7 designs expanded into an 8x16 cell by
-tools/image/build_psf2_font.ps1. No host font or external binary asset is used.
+JetBrains Mono and this rasterized derivative are licensed under the SIL Open
+Font License, Version 1.1. The complete license is in OFL.txt beside this file.
+
+tools/image/import_alpha4_font.ps1 rasterizes ASCII glyphs into 12x24 cells and
+stores their 4-bit coverage values in inferenceos-console-alpha4.rle.b64. The
+normal build expands that checked-in source deterministically; it does not need
+the TrueType source or an installed host font.

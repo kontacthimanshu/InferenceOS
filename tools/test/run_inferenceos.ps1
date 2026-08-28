@@ -29,6 +29,10 @@ $SerialMarkers = [ordered]@{
     Panic = 'INFERENCEOS:PANIC'
     PanicHalt = 'INFERENCEOS:PANIC_HALT'
     Shutdown = 'INFERENCEOS:SHUTDOWN'
+    TestControlReady = 'INFERENCEOS:TEST_CONTROL_READY version=1 transport=com2 profile=q35'
+    TestControlBegin = 'INFERENCEOS:TEST_CONTROL_BEGIN version=1'
+    TestControlPass = 'INFERENCEOS:TEST_CONTROL_PASS version=1'
+    TestControlFail = 'INFERENCEOS:TEST_CONTROL_FAIL version=1'
 }
 
 function Resolve-RequiredFile([string]$Path, [string]$Description) {

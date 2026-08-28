@@ -72,6 +72,7 @@ static void initialize_stack(
     ios_type_icon_capability *image_capability
 )
 {
+    ios_type_icon_capability generic_capability;
     *directory = (struct fake_directory){ .entries = {
         make_entry("REPORT", 7, TEXT_TYPE, IOS_VFS_OBJECT_REGULAR_FILE),
         make_entry("CHART", 9, IMAGE_TYPE, IOS_VFS_OBJECT_REGULAR_FILE),
@@ -96,7 +97,13 @@ static void initialize_stack(
     IOS_TEST_ASSERT_STATUS(
         ios_type_catalog_register(catalog, IMAGE_TYPE, IOS_ICON_IMAGE, image_capability), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
-        ios_file_view_service_initialize(service, registry, catalog), IOS_OK);
+        ios_type_catalog_register(
+            catalog, UINT64_MAX, IOS_ICON_GENERIC_FILE, &generic_capability
+        ), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_service_initialize(
+            service, registry, catalog, generic_capability
+        ), IOS_OK);
 }
 
 static ios_status dispatch(
@@ -210,10 +217,40 @@ static void test_pagination_and_forged_type_capability_are_bounded(void)
     IOS_TEST_ASSERT(directory.calls == calls_before_forgery);
 }
 
+static void test_unmapped_files_receive_nonzero_generic_icon_capability(void)
+{
+    struct fake_directory directory;
+    struct ios_block_device device;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_mount_registry registry;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service service;
+    struct ios_shell_file_view_reply reply;
+    ios_type_icon_capability text_capability;
+    ios_type_icon_capability image_capability;
+    enum ios_presentation_icon icon;
+    initialize_stack(
+        &directory, &device, &root, &mount, &registry, &catalog, &service,
+        &text_capability, &image_capability
+    );
+    directory.entries[1].internal_type_identity = UINT64_C(0x5a4950); /* ZIP */
+    IOS_TEST_ASSERT_STATUS(
+        dispatch(&service, IOS_SHELL_DIRECTORY_VIEW, 0, 0, 4, &reply), IOS_OK);
+    IOS_TEST_ASSERT(reply.entries[1].type_icon_capability != 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_type_catalog_resolve_icon(
+            &catalog, reply.entries[1].type_icon_capability,
+            IOS_TYPE_CATALOG_REGULAR_FILE, &icon
+        ), IOS_OK);
+    IOS_TEST_ASSERT(icon == IOS_ICON_GENERIC_FILE);
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_directory_view_returns_bounded_display_safe_entries),
     IOS_TEST_CASE(test_type_and_search_verify_exact_identity_after_colliding_prefilter),
-    IOS_TEST_CASE(test_pagination_and_forged_type_capability_are_bounded)
+    IOS_TEST_CASE(test_pagination_and_forged_type_capability_are_bounded),
+    IOS_TEST_CASE(test_unmapped_files_receive_nonzero_generic_icon_capability)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

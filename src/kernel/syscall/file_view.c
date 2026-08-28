@@ -36,7 +36,7 @@ static ios_status make_safe_entry(
             service->type_catalog, source->internal_type_identity, &type_capability
         );
         if (status == IOS_ERROR(IOS_E_NOT_FOUND)) {
-            type_capability = IOS_INVALID_TYPE_ICON_CAPABILITY;
+            type_capability = service->generic_file_capability;
         } else if (IOS_FAILED(status)) {
             return status;
         }
@@ -58,13 +58,22 @@ static ios_status make_safe_entry(
 ios_status ios_file_view_service_initialize(
     struct ios_file_view_service *service,
     struct ios_vfs_mount_registry *mount_registry,
-    const struct ios_type_catalog *type_catalog
+    const struct ios_type_catalog *type_catalog,
+    ios_type_icon_capability generic_file_capability
 )
 {
-    if (service == NULL || mount_registry == NULL || type_catalog == NULL) {
+    enum ios_presentation_icon fallback_icon;
+    if (service == NULL || mount_registry == NULL || type_catalog == NULL
+        || generic_file_capability == IOS_INVALID_TYPE_ICON_CAPABILITY
+        || IOS_FAILED(ios_type_catalog_resolve_icon(
+            type_catalog, generic_file_capability,
+            IOS_TYPE_CATALOG_REGULAR_FILE, &fallback_icon
+        )) || fallback_icon != IOS_ICON_GENERIC_FILE) {
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     }
-    *service = (struct ios_file_view_service){ mount_registry, type_catalog };
+    *service = (struct ios_file_view_service){
+        mount_registry, type_catalog, generic_file_capability
+    };
     return IOS_OK;
 }
 

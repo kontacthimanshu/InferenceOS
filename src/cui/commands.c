@@ -13,13 +13,13 @@ static ios_status clear_command(
 );
 
 static const struct ios_cui_command help_descriptor = {
-    "help", "list available commands", help_command
+    "help", "list commands or show command usage", "help [command]", help_command
 };
 static const struct ios_cui_command version_descriptor = {
-    "version", "show the InferenceOS version", version_command
+    "version", "show the InferenceOS version", "version", version_command
 };
 static const struct ios_cui_command clear_descriptor = {
-    "clear", "clear the console", clear_command
+    "clear", "clear the console", "clear", clear_command
 };
 
 void ios_cui_command_registry_initialize(struct ios_cui_command_registry *registry)
@@ -32,7 +32,9 @@ ios_status ios_cui_command_register(
 )
 {
     if (registry == NULL || command == NULL || command->name == NULL
-        || *command->name == '\0' || command->summary == NULL || command->handler == NULL) {
+        || *command->name == '\0' || command->summary == NULL
+        || command->usage == NULL || *command->usage == '\0'
+        || command->handler == NULL) {
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     }
     for (ios_size index = 0; index < registry->command_count; ++index) {
@@ -85,10 +87,23 @@ static ios_status help_command(
 )
 {
     const struct ios_cui_command_registry *registry = io->registry;
-    (void)arguments;
-    if (argument_count != 1 || registry == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if ((argument_count != 1 && argument_count != 2) || registry == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    if (argument_count == 2) {
+        for (ios_size index = 0; index < registry->command_count; ++index) {
+            const struct ios_cui_command *command = registry->commands[index];
+            if (strcmp(command->name, arguments[1]) != 0) continue;
+            io->write(command->usage, io->write_context);
+            io->write(" - ", io->write_context);
+            io->write(command->summary, io->write_context);
+            io->write("\n", io->write_context);
+            return IOS_OK;
+        }
+        return IOS_ERROR(IOS_E_NOT_FOUND);
+    }
     for (ios_size index = 0; index < registry->command_count; ++index) {
-        io->write(registry->commands[index]->name, io->write_context);
+        io->write(registry->commands[index]->usage, io->write_context);
         io->write(" - ", io->write_context);
         io->write(registry->commands[index]->summary, io->write_context);
         io->write("\n", io->write_context);

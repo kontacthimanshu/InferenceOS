@@ -5,7 +5,7 @@
 #include <inferenceos/system_module.h>
 
 enum {
-    IOS_BOOT_INFO_VERSION = 2,
+    IOS_BOOT_INFO_VERSION = 3,
     IOS_BOOT_FRAMEBUFFER_BGRX8888 = 1,
     IOS_BOOT_FLAG_GUI_UNAVAILABLE = UINT32_C(1) << 0
 };
@@ -33,8 +33,10 @@ struct ios_boot_info {
     ios_u32 module_descriptor_size;
     ios_uptr esp_device_handle;
     ios_uptr root_system_description_pointer;
+    ios_uptr runtime_services;
+    ios_u8 boot_partition_guid[16];
 };
 
-IOS_STATIC_ASSERT(sizeof(struct ios_boot_info) == 120, "boot information ABI size");
+IOS_STATIC_ASSERT(sizeof(struct ios_boot_info) == 144, "boot information ABI size");
 
 #endif

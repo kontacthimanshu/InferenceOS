@@ -164,7 +164,7 @@ $trace = @(
     New-Trace 'SC-017' @('T115', 'T120') @('T115', 'T120', 'T123') `
         @('tests/benchmarks/registry_benchmark.c', 'tests/system/registry_benchmark_report_test.ps1', 'tools/test/run_registry_benchmark.ps1') `
         @('registry-benchmark-contract', 'registry-benchmark-report-system') @() @('registry-benchmark-report') `
-        @('cmake --build --preset gcc-release --target benchmark-registry')
+        @('cmake --build --preset gcc-debug --target benchmark-registry-qemu')
     New-Trace 'SC-018' @('T052-T058', 'T077-T078') @('T049-T051', 'T074', 'T093', 'T123') `
         @('tests/unit/directory_record_test.c', 'tests/fault/file_commit_fault_test.c', 'tests/fault/mount_validation_test.c', 'tests/fault/diagnostic_bounds_test.c') `
         @('directory-record-unit', 'file-commit-fault', 'mount-validation-fault', 'diagnostic-bounds-fault') @() @() `

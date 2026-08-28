@@ -1,6 +1,7 @@
 #include <inferenceos/test.h>
 #include <inferenceos/drivers/virtio_blk.h>
 #include <inferenceos/fake_block.h>
+#include <inferenceos/memory.h>
 #include <string.h>
 
 enum { TEST_QUEUE_CAPACITY = 8 };
@@ -33,6 +34,44 @@ void x86_64_memory_barrier(void)
 
 void x86_64_cpu_relax(void)
 {
+}
+
+ios_uptr x86_64_paging_root(void)
+{
+    return 0;
+}
+
+void x86_64_paging_activate(ios_uptr root_address)
+{
+    (void)root_address;
+}
+
+ios_status virtual_translate(
+    const struct ios_address_space *address_space,
+    ios_uptr virtual_address,
+    ios_uptr *physical_address
+)
+{
+    (void)address_space;
+    (void)virtual_address;
+    (void)physical_address;
+    return IOS_ERROR(IOS_E_NOT_FOUND);
+}
+
+ios_status virtual_map_pages(
+    struct ios_address_space *address_space,
+    ios_uptr virtual_address,
+    ios_uptr physical_address,
+    ios_u64 page_count,
+    ios_u32 flags
+)
+{
+    (void)address_space;
+    (void)virtual_address;
+    (void)physical_address;
+    (void)page_count;
+    (void)flags;
+    return IOS_OK;
 }
 
 struct test_transport {

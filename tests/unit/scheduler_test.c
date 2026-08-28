@@ -57,6 +57,8 @@ struct IOS_PACKED test_rsdp {
 };
 
 static ios_u32 pm_timer;
+static bool hyperv_reference_available;
+static ios_u64 hyperv_reference_time;
 static struct ios_process *activated_process;
 
 _Noreturn void ios_assertion_failed(const char *condition, const char *file, ios_u32 line)
@@ -127,6 +129,19 @@ ios_u32 x86_64_port_read32(ios_u16 port)
     IOS_TEST_ASSERT(port == UINT16_C(0x408));
     pm_timer += 4096;
     return pm_timer;
+}
+
+ios_status x86_64_hyperv_read_reference_time(ios_u64 *reference_time)
+{
+    if (reference_time == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    if (!hyperv_reference_available) {
+        return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    }
+    hyperv_reference_time += 4096;
+    *reference_time = hyperv_reference_time;
+    return IOS_OK;
 }
 
 void process_mark_exited(struct ios_process *process, ios_i64 exit_status)
@@ -237,6 +252,59 @@ static void test_acpi_discovery_and_apic_calibration(void)
         apic_registers[TEST_APIC_TIMER_INITIAL / sizeof(ios_u32)]
         == x86_64_apic_timer_ticks_per_quantum()
     );
+}
+
+static void test_hyperv_calibrates_without_legacy_acpi_pm_timer(void)
+{
+    static ios_u32 apic_registers[0x400 / sizeof(ios_u32)];
+    struct test_madt madt;
+    struct test_fadt fadt;
+    struct test_xsdt xsdt;
+    struct test_rsdp rsdp;
+    struct x86_64_platform_info platform;
+
+    memset(apic_registers, 0, sizeof(apic_registers));
+    memset(&madt, 0, sizeof(madt));
+    initialize_header(&madt.header, "APIC", sizeof(madt));
+    madt.local_apic_address = (ios_uptr)apic_registers;
+    madt.type = 0;
+    madt.entry_length = 8;
+    madt.apic_id = 9;
+    madt.processor_flags = 1;
+    checksum(&madt, sizeof(madt), offsetof(struct test_acpi_header, checksum));
+
+    memset(&fadt, 0, sizeof(fadt));
+    initialize_header(&fadt.header, "FACP", sizeof(fadt));
+    checksum(&fadt, sizeof(fadt), offsetof(struct test_acpi_header, checksum));
+
+    memset(&xsdt, 0, sizeof(xsdt));
+    initialize_header(&xsdt.header, "XSDT", sizeof(xsdt));
+    xsdt.entries[0] = (ios_u64)(ios_uptr)&madt;
+    xsdt.entries[1] = (ios_u64)(ios_uptr)&fadt;
+    checksum(&xsdt, xsdt.header.length, offsetof(struct test_acpi_header, checksum));
+
+    memset(&rsdp, 0, sizeof(rsdp));
+    memcpy(rsdp.signature, "RSD PTR ", 8);
+    rsdp.revision = 2;
+    rsdp.length = sizeof(rsdp);
+    rsdp.xsdt_address = (ios_u64)(ios_uptr)&xsdt;
+    checksum(&rsdp, 20, offsetof(struct test_rsdp, checksum));
+    checksum(&rsdp, sizeof(rsdp), offsetof(struct test_rsdp, extended_checksum));
+
+    IOS_TEST_ASSERT_STATUS(x86_64_acpi_discover(&rsdp, &platform), IOS_OK);
+    IOS_TEST_ASSERT(platform.pm_timer_port == 0);
+    IOS_TEST_ASSERT(platform.pm_timer_width == 0);
+
+    platform.local_apic_address = (ios_uptr)apic_registers;
+    apic_registers[TEST_APIC_ID / sizeof(ios_u32)] = UINT32_C(9) << 24;
+    hyperv_reference_available = true;
+    hyperv_reference_time = 0;
+    pm_timer = 0;
+    IOS_TEST_ASSERT_STATUS(x86_64_apic_timer_initialize(&platform), IOS_OK);
+    IOS_TEST_ASSERT(hyperv_reference_time >= UINT64_C(100000));
+    IOS_TEST_ASSERT(pm_timer == 0);
+    IOS_TEST_ASSERT(x86_64_apic_timer_ticks_per_quantum() != 0);
+    hyperv_reference_available = false;
 }
 
 static void test_platform_initialization_installs_ten_ms_timer(void)
@@ -376,6 +444,7 @@ static void test_priority_blocking_wakeup_and_idle(void)
 
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_acpi_discovery_and_apic_calibration),
+    IOS_TEST_CASE(test_hyperv_calibrates_without_legacy_acpi_pm_timer),
     IOS_TEST_CASE(test_platform_initialization_installs_ten_ms_timer),
     IOS_TEST_CASE(test_round_robin_preemption_has_no_starvation),
     IOS_TEST_CASE(test_timer_interrupt_preserves_and_switches_user_context),

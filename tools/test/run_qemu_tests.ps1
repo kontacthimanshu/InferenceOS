@@ -93,22 +93,31 @@ function Get-FreeTcpPort {
 function Send-TestControlRequest(
     [int]$Port, [uint32]$Sequence, [string]$Action, [string]$Argument
 ) {
-    $client = [System.Net.Sockets.TcpClient]::new()
-    try {
-        $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
-        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) {
-            throw "Timed out connecting to the q35 COM2 test-control port $Port."
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $lastFailure = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $pending = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
+            if (-not $pending.AsyncWaitHandle.WaitOne(500)) {
+                throw "Connection attempt to q35 COM2 timed out."
+            }
+            $client.EndConnect($pending)
+            $line = "INFERENCEOS_TEST 1 $Sequence $Action"
+            if (-not [string]::IsNullOrWhiteSpace($Argument)) { $line += " $Argument" }
+            $bytes = [System.Text.Encoding]::ASCII.GetBytes($line + "`n")
+            $stream = $client.GetStream()
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush()
+            return
+        } catch {
+            $lastFailure = $_.Exception.Message
+            Start-Sleep -Milliseconds 50
+        } finally {
+            $client.Dispose()
         }
-        $client.EndConnect($pending)
-        $line = "INFERENCEOS_TEST 1 $Sequence $Action"
-        if (-not [string]::IsNullOrWhiteSpace($Argument)) { $line += " $Argument" }
-        $bytes = [System.Text.Encoding]::ASCII.GetBytes($line + "`n")
-        $stream = $client.GetStream()
-        $stream.Write($bytes, 0, $bytes.Length)
-        $stream.Flush()
-    } finally {
-        $client.Dispose()
     }
+    throw "Could not connect to the q35 COM2 test-control port $Port within 5 seconds: $lastFailure"
 }
 
 function Get-PortableRelativePath([string]$BasePath, [string]$TargetPath) {
@@ -290,8 +299,8 @@ if (-not [string]::IsNullOrWhiteSpace($TestAction) -and
     throw 'TestAction must be a lowercase protocol action token of at most 47 characters.'
 }
 if (-not [string]::IsNullOrEmpty($TestArgument) -and
-    ($TestArgument.Length -ge 160 -or $TestArgument -match '[\r\n]')) {
-    throw 'TestArgument must fit the bounded one-line protocol payload.'
+    ($TestArgument.Length -ge 160 -or $TestArgument -match '[^\x20-\x7E]')) {
+    throw 'TestArgument must be printable ASCII and fit the bounded one-line protocol payload.'
 }
 $allForbiddenMarkers = @($PanicMarkers + $ForbiddenMarker | Select-Object -Unique)
 if (-not [string]::IsNullOrWhiteSpace($TestAction)) {
@@ -301,7 +310,11 @@ if (-not [string]::IsNullOrWhiteSpace($TestAction)) {
 $testPassMarker = if ([string]::IsNullOrWhiteSpace($TestAction)) { $null } else {
     "INFERENCEOS:TEST_CONTROL_PASS version=1 sequence=$TestSequence action=$TestAction"
 }
+$testBeginMarker = if ([string]::IsNullOrWhiteSpace($TestAction)) { $null } else {
+    "INFERENCEOS:TEST_CONTROL_BEGIN version=1 sequence=$TestSequence action=$TestAction"
+}
 $effectiveRequiredMarkers = @($RequiredMarker)
+if ($null -ne $testBeginMarker) { $effectiveRequiredMarkers += $testBeginMarker }
 if ($null -ne $testPassMarker) { $effectiveRequiredMarkers += $testPassMarker }
 foreach ($marker in $effectiveRequiredMarkers) {
     if ($marker -in $allForbiddenMarkers) { throw "Marker '$marker' cannot be both required and forbidden." }

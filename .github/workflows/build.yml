@@ -137,11 +137,9 @@ jobs:
       matrix:
         include:
           - compiler: GCC
-            cc: gcc
-            build-directory: build/host-gcc
+            preset: gcc-host-debug
           - compiler: Clang
-            cc: clang
-            build-directory: build/host-clang
+            preset: clang-host-debug
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -155,22 +153,17 @@ jobs:
         shell: bash
         run: |
           source .ci-tools/environment.sh
-          cmake -S . -B "${{ matrix.build-directory }}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DCMAKE_ASM_COMPILER=${{ matrix.cc }} \
-            -DINFERENCEOS_BUILD_HOST_TESTS=ON \
-            -DINFERENCEOS_WARNINGS_AS_ERRORS=ON
+          cmake --preset "${{ matrix.preset }}"
       - name: Build native tests
         shell: bash
         run: |
           source .ci-tools/environment.sh
-          cmake --build "${{ matrix.build-directory }}" --parallel 2
+          cmake --build --preset "${{ matrix.preset }}" --parallel 2
       - name: Run native tests
         shell: bash
         run: |
           source .ci-tools/environment.sh
-          ctest --test-dir "${{ matrix.build-directory }}" --output-on-failure --no-tests=error
+          ctest --test-dir "build/${{ matrix.preset }}" --output-on-failure --no-tests=error
       - name: Retain test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,5 +172,5 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           path: |
-            ${{ matrix.build-directory }}/Testing/Temporary/
-            ${{ matrix.build-directory }}/compile_commands.json
+            build/${{ matrix.preset }}/Testing/Temporary/
+            build/${{ matrix.preset }}/compile_commands.json

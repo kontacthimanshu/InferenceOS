@@ -134,6 +134,9 @@ ios_status ios_boot_info_validate(const struct ios_boot_info *information)
     if (!range_is_valid(information->root_system_description_pointer, 20)) {
         return IOS_ERROR(IOS_E_PROTOCOL);
     }
+    if (!range_is_valid(information->runtime_services, 24)) {
+        return IOS_ERROR(IOS_E_PROTOCOL);
+    }
     if (information->memory_map_count == 0
         || information->memory_map_count > IOS_MEMORY_MAP_MAX_REGIONS
         || information->memory_descriptor_size < IOS_BOOT_MEMORY_DESCRIPTOR_MINIMUM_SIZE

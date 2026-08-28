@@ -18,7 +18,7 @@ Desktop / GUI terminal / File Explorer
                   |
       retained window manager
                   |
-      2D primitives and PSF2 text
+    2D primitives and raster text
                   |
        graphics surface abstraction
                   |
@@ -43,9 +43,10 @@ structures.
 
 A graphics surface records a pixel pointer, width, height, and stride. The version-1 renderer
 provides clipped pixel writes, filled rectangles, lines, borders, a software pointer, and raster
-text. Text uses a validated 8x16 PSF2 bitmap font. Invalid dimensions, overflow, malformed font
-headers, unsupported glyph geometry, and out-of-range operations fail or clip without writing
-outside the surface.
+text. The boot UI uses a validated 12x24 JetBrains Mono-derived atlas with 4-bit antialias coverage,
+real mixed-case glyphs, and per-channel blending. The legacy 8x16 PSF2 parser remains available for
+compatibility. Invalid dimensions, overflow, malformed font headers, unsupported glyph geometry,
+and out-of-range operations fail or clip without writing outside the surface.
 
 Rendering uses a framebuffer-sized shadow surface. Clients draw into owned surfaces and invalidate
 changed regions; the compositor copies the resulting dirty region to the physical framebuffer.
@@ -80,6 +81,11 @@ The compositor:
 - draws the software pointer last; and
 - copies only the dirty area from shadow memory to the GOP framebuffer.
 
+The desktop reserves a red `X` button in the top-right corner. Clicking it
+closes GUI mode, stops the GUI terminal and desktop modules, clears the
+framebuffer, and restores a fresh CUI prompt. `Ctrl+Alt+Escape` provides the
+same transition when pointer input is unavailable.
+
 Rendering a window through the Shell GUI-view service additionally validates that the window and
 view handles belong to the calling process and application, require the expected rights, refer to
 the same target, and use a strictly increasing render sequence.
@@ -91,7 +97,7 @@ The `gui` command asks the Shell runtime to start the desktop and terminal modul
 1. confirm the CUI is usable and no GUI is already running;
 2. confirm the desktop and terminal modules are available;
 3. open and validate the GOP framebuffer;
-4. validate the PSF2 font;
+4. validate the alpha4 console font;
 5. start the desktop module and window manager;
 6. start the terminal module and its window; and
 7. compose the first frame and report GUI ready.
@@ -120,7 +126,7 @@ File Explorer is split into independently testable layers:
 | Shell client/provider | Request paged directory/type/search views and rendering through versioned Shell IPC; reconnect after Shell generation changes. |
 | Model | Hold at most 64 display-safe entries, selection, current opaque directory handle, and 16 back-history entries. |
 | Controller | Navigate directories, create a directory, remove an authorized empty directory, and refresh after mutations. |
-| Window | Render rows, selection, extension-free names, and resolved type/folder/generic icons. |
+| Window | Render a scrollable icon grid, selection, extension-free names, and resolved type/folder/generic icons. |
 | Properties | Copy only the selected display-safe name, object kind, size, generic attributes, opaque handle, and allowed operations. |
 | Diagnostic inspector | With separate authority, show filesystem, file, hash, and bounded FAT pages. |
 
@@ -130,13 +136,14 @@ received as `REPORT`. Colliding hidden names are deterministically labeled, for 
 and `REPORT (2)`, without renaming either persistent object.
 
 The icon catalog resolves opaque type/icon capabilities to text, image, application, folder, or
-generic-file presentation. Unknown or absent file mappings use the generic icon; directories use
-the folder icon. File Explorer never derives a type by parsing a hidden extension.
+generic-file presentation. Text files use a lined-page icon, images use a picture icon,
+applications use an application tile, directories use a folder icon, and unknown mappings use a
+generic page icon. File Explorer never derives a type by parsing a hidden extension.
 
 ### Input behavior
 
-- Left-click selects the row under the pointer.
-- Up and Down move the selection within the visible model.
+- Left-click selects the icon under the pointer.
+- Left and Right move between icons; Up and Down move between grid rows and scroll as needed.
 - Enter activates the selection; a directory with enumerate rights becomes the new view.
 - Backspace navigates to the previous opaque directory handle.
 - In the privileged diagnostic inspector, Left/Right changes pages and Escape closes it.
@@ -152,6 +159,12 @@ validates the caller-supplied wire structure and kernel-supplied caller identity
 kernel file-view or GUI-view service. The file-view service enumerates through VFS and converts
 entries to display-safe replies. Shell and File Explorer do not parse filesystem directory records
 or communicate with block devices.
+
+For an InferenceOS-FS mount, the filesystem driver follows the validated FAT directory chain,
+decodes healthy directory records, suppresses internal companion records, and supplies an internal
+type identity to VFS. The kernel converts that identity to an opaque icon capability before the
+entry crosses the Shell boundary. Thus the program reflects the FAT-backed namespace without
+receiving raw FAT values, cluster locations, extensions, or hashes.
 
 The complete application-facing schema and authorization rules are in
 [application contracts](applications.md). The on-disk and extension-hiding rules are in

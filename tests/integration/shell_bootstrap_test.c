@@ -39,7 +39,7 @@ static ios_status service_command(
 }
 
 static const struct ios_cui_command service_descriptor = {
-    "service", "exercise the shared command context", service_command
+    "service", "exercise the shared command context", "service", service_command
 };
 
 static void write_u32(ios_u8 *bytes, ios_u32 value)
@@ -134,6 +134,8 @@ static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
     struct test_observation observation = { 0 };
     struct ios_shell_runtime shell;
     struct ios_shell_config config;
+    struct ios_input_event close_event;
+    bool close_requested;
 
     make_font(font_data, &font);
     config = make_config(
@@ -189,6 +191,32 @@ static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
         IOS_OK
     );
     IOS_TEST_ASSERT(observation.command_calls == 2);
+
+    close_event = (struct ios_input_event){
+        .structure_size = sizeof(close_event),
+        .structure_version = IOS_INPUT_EVENT_VERSION,
+        .type = IOS_INPUT_EVENT_POINTER_BUTTON,
+        .flags = IOS_INPUT_PRESSED,
+        .code = IOS_POINTER_BUTTON_LEFT,
+        .x = shell.desktop.close_button_bounds.x + 1,
+        .y = shell.desktop.close_button_bounds.y + 1
+    };
+    IOS_TEST_ASSERT_STATUS(
+        ios_desktop_handle_input(&shell.desktop, &close_event, &close_requested), IOS_OK
+    );
+    IOS_TEST_ASSERT(close_requested);
+
+    close_event = (struct ios_input_event){
+        .structure_size = sizeof(close_event),
+        .structure_version = IOS_INPUT_EVENT_VERSION,
+        .type = IOS_INPUT_EVENT_KEY,
+        .flags = IOS_INPUT_PRESSED | IOS_INPUT_CONTROL | IOS_INPUT_ALT,
+        .code = IOS_KEY_ESCAPE
+    };
+    IOS_TEST_ASSERT_STATUS(
+        ios_desktop_handle_input(&shell.desktop, &close_event, &close_requested), IOS_OK
+    );
+    IOS_TEST_ASSERT(close_requested);
 
     ios_shell_stop_gui(&shell, NULL);
     IOS_TEST_ASSERT(!shell.gui_running && shell.cui_usable);

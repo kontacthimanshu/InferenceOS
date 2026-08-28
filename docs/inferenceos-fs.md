@@ -154,6 +154,12 @@ a directory-cluster boundary; if only the last slot is free, allocation continue
 directory cluster. Enumeration exposes a validated pair as one file and never exposes companions as
 independent objects.
 
+Ordinary directory enumeration follows each validated directory's FAT chain and converts healthy
+records into VFS entries. Directories carry folder identity; regular files carry a kernel-private
+type identity derived from their authoritative extension plus the companion hash as an internal
+prefilter. These fields support GUI icon selection, but raw FAT entries, extensions, companion
+records, and hashes never enter the ordinary File Explorer model.
+
 ## Extension-hash companion
 
 Every healthy committed regular file has exactly one 32-byte companion immediately before its
@@ -220,6 +226,20 @@ stored name bytes. Consequently, a base-name-only rename preserves the extension
 updates the checksum and companion CRC. An extension-changing rename recomputes the length, hash,
 checksum, and CRC. Hash-based lookup is only a prefilter: exact authoritative extension bytes and
 length must match before a type match is returned, so collisions do not affect identity or routing.
+
+### Extension search
+
+The shell-facing `search <extension>` service accepts one to three supported extension characters,
+with an optional leading dot, and canonicalizes ASCII case. The VFS delegates a read-only recursive
+search to InferenceOS-FS. For every regular-file candidate, the filesystem validates the committed
+primary/companion pair, compares the companion hash with the internally computed query hash as a
+prefilter, and then compares the authoritative primary extension bytes and length exactly.
+
+The reply contains at most 16 absolute, extension-hidden display paths plus an explicit truncation
+flag. It contains no extension, stored or computed hash, companion, or raw directory record.
+Traversal is bounded to 16 directory levels and 255-byte paths. Search never writes metadata and
+does not consult the optional Extension Registry, so disabled, stale, corrupt, or full registry
+state cannot change its results.
 
 ## CRC integrity
 

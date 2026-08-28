@@ -865,6 +865,7 @@ static ios_status enable_pci_function(
 static ios_status map_default_mmio_bars(struct virtio_blk_pci_state *state)
 {
     struct ios_address_space kernel = { x86_64_paging_root() };
+    bool mapping_added = false;
     for (ios_size index = 0; index < IOS_PCI_BAR_COUNT; ++index) {
         const struct ios_pci_bar *bar = &state->function.bars[index];
         ios_uptr first;
@@ -888,8 +889,10 @@ static ios_status map_default_mmio_bars(struct virtio_blk_pci_state *state)
                 &kernel, page, page, 1, IOS_VM_WRITE | IOS_VM_GLOBAL
             );
             if (IOS_FAILED(status)) return status;
+            mapping_added = true;
         }
     }
+    if (mapping_added) x86_64_paging_activate(kernel.root_address);
     return IOS_OK;
 }
 

@@ -36,15 +36,17 @@ error: <symbol>: <message>
 ```
 
 A parse failure is reported with symbols such as `line_too_long`, `invalid_character`,
-`invalid_syntax`, or `too_many_arguments`. Unknown commands use `command_not_found`; a handler
-failure uses `command_failed`. After an error, the console clears the current line and prints a new
-prompt.
+`invalid_syntax`, or `too_many_arguments`. Unknown commands use `command_not_found`; handler
+failures identify their cause, such as `invalid_arguments`, `not_found`, `already_exists`,
+`read_only`, or `not_empty`. After an error, the console clears the current line and prints a new
+prompt. When a known command has invalid arguments, the next line prints its exact syntax. For
+example, `fileinfo` alone reports `invalid_arguments` followed by `usage: fileinfo <path>`.
 
 ## Core and interface commands
 
 | Command | Purpose |
 |---|---|
-| `help` | List every currently registered command and its summary. |
+| `help [command]` | List every registered command with its syntax, or show exact usage for one command. |
 | `version` | Print the demonstrator version. |
 | `clear` | Clear the active text console and return the cursor to the upper-left corner. |
 | `gui` | Start the graphical desktop and GUI terminal. It fails safely if required modules, the framebuffer, font, desktop, terminal, or composition are unavailable. |
@@ -60,7 +62,7 @@ the version-1 command context.
 | Syntax | Purpose and important behavior |
 |---|---|
 | `devices` | List registered devices with status, logical sector size, sector count, and byte capacity. |
-| `diskinfo diskN` | Show the same information for one device. |
+| `diskinfo diskN` | Show device geometry plus detected filesystem, classification state, and current mount state. A valid volume is reported as `filesystem=InferenceOS-FS`; blank media reports `filesystem=none`; partitioned, foreign, or unreadable media reports `filesystem=unknown` with a precise `filesystem_state`. |
 | `format diskN` | Create InferenceOS-FS on an unmounted device. The device must use 512-byte sectors and meet the 50,000,000,000-byte minimum. |
 | `mount diskN /` | Probe and mount the device as the one VFS root. Reports read-write, diagnostic-read-only, or rejected state. |
 | `unmount /` | Refuse active operations, flush the device, detach the root, and invalidate the mount. |
@@ -86,10 +88,19 @@ The detailed version-1 disk format and mount classifications are in
 | `type <path>` | Write file content to the console. |
 | `rename <source> <destination>` | Rename a regular file; an extension change recomputes companion metadata before commit. |
 | `delete <path>` | Delete a regular file through the ordered filesystem transaction. |
+| `search <extension>` | Recursively list files with the exact extension. Accepts `DOC` or `.DOC` case-insensitively and prints extension-hidden absolute locations. |
 
 Quoted input is needed when `write` or `append` content contains spaces. Version 1 does not provide
 redirection, stdin streams, or binary escape syntax; these commands pass the parsed argument bytes
 to the shared file-operation interface.
+
+`search` sends the extension through the shell-facing kernel service; the CUI never receives the
+computed hash or raw directory metadata. InferenceOS-FS uses the companion hash only to prefilter
+healthy file pairs and then compares the authoritative canonical extension exactly. Results are
+listed one location per line, `no matches` is printed for an empty result, and `results truncated`
+is printed after the first 16 locations when more matches exist. Missing, additional, malformed,
+or overlong extension arguments produce `usage: search <extension>` through the normal command
+error path.
 
 ## Directory commands
 

@@ -78,7 +78,7 @@ IOS_STATIC_ASSERT(
         == IOS_SYSTEM_MODULE_DIGEST_SIZE,
     "module digest width changed"
 );
-IOS_STATIC_ASSERT(sizeof(struct ios_boot_info) == 120, "boot-information ABI changed");
+IOS_STATIC_ASSERT(sizeof(struct ios_boot_info) == 144, "boot-information ABI changed");
 IOS_STATIC_ASSERT(
     offsetof(struct ios_boot_info, memory_map_address) == 16,
     "boot memory-map address offset changed"

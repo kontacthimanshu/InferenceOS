@@ -91,10 +91,58 @@ static void test_overlong_line_is_discarded_without_dispatch(void)
     IOS_TEST_ASSERT(fixture.dispatch_count == 0);
 }
 
+static void test_rejects_zero_replayed_and_invalid_action_sequences(void)
+{
+    struct fixture fixture = {
+        "INFERENCEOS_TEST 1 0 start_gui\n"
+        "INFERENCEOS_TEST 1 7 StartGui\n"
+        "INFERENCEOS_TEST 1 7 start_gui\n"
+        "INFERENCEOS_TEST 1 7 start_gui\n"
+        "INFERENCEOS_TEST 1 6 start_gui\n"
+        "INFERENCEOS_TEST 1 8 start_gui\n",
+        0, 0, { 0 }
+    };
+    struct ios_test_control control;
+    IOS_TEST_ASSERT_STATUS(
+        ios_test_control_initialize(
+            &control, read_character, &fixture, dispatch_request, &fixture
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_test_control_poll(&control, 512), IOS_ERROR(IOS_E_PROTOCOL)
+    );
+    IOS_TEST_ASSERT(fixture.dispatch_count == 2);
+    IOS_TEST_ASSERT(fixture.request.sequence == 8);
+}
+
+static void test_non_ascii_line_is_discarded_and_next_request_recovers(void)
+{
+    struct fixture fixture = {
+        "INFERENCEOS_TEST 1 1 start_gui\001bad\n"
+        "INFERENCEOS_TEST 1 2 start_gui\n",
+        0, 0, { 0 }
+    };
+    struct ios_test_control control;
+    IOS_TEST_ASSERT_STATUS(
+        ios_test_control_initialize(
+            &control, read_character, &fixture, dispatch_request, &fixture
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_test_control_poll(&control, 256), IOS_ERROR(IOS_E_PROTOCOL)
+    );
+    IOS_TEST_ASSERT(fixture.dispatch_count == 1);
+    IOS_TEST_ASSERT(fixture.request.sequence == 2);
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_fragmented_versioned_request_dispatches_once),
     IOS_TEST_CASE(test_rejects_bad_version_and_recovers_at_next_line),
-    IOS_TEST_CASE(test_overlong_line_is_discarded_without_dispatch)
+    IOS_TEST_CASE(test_overlong_line_is_discarded_without_dispatch),
+    IOS_TEST_CASE(test_rejects_zero_replayed_and_invalid_action_sequences),
+    IOS_TEST_CASE(test_non_ascii_line_is_discarded_and_next_request_recovers)
 };
 
 const size_t ios_test_case_count = sizeof(ios_test_cases) / sizeof(ios_test_cases[0]);

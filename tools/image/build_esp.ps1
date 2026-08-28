@@ -155,7 +155,7 @@ if (-not [System.IO.File]::Exists($manifestSource)) {
 }
 $systemRoot = Split-Path -Parent $manifestSource
 $hashSource = Join-Path $systemRoot 'modules.sha256'
-$fontSource = Join-Path $systemRoot 'inferenceos-8x16.psf2'
+$fontSource = Join-Path $systemRoot 'inferenceos-console-12x24.alpha4'
 foreach ($requiredSystemArtifact in @($hashSource, $fontSource)) {
     if (-not [System.IO.File]::Exists($requiredSystemArtifact)) {
         throw "Module directory is incomplete; missing '$requiredSystemArtifact'."

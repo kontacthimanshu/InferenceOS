@@ -45,6 +45,7 @@ typedef ios_status (*ios_cui_command_handler)(
 struct ios_cui_command {
     const char *name;
     const char *summary;
+    const char *usage;
     ios_cui_command_handler handler;
 };
 

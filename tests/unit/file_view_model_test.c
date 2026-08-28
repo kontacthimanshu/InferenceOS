@@ -225,10 +225,12 @@ static void test_pointer_keyboard_navigation_and_rendering_use_safe_model(void)
 {
     struct fake_view_provider fake;
     struct ios_file_explorer_model model;
-    ios_u32 pixels[80 * 80] = { 0 };
+    ios_u32 pixels[320 * 220] = { 0 };
     ios_u8 glyphs[128 * 16] = { 0 };
-    struct ios_graphics_surface surface = { pixels, 80, 80, 80 };
-    struct ios_psf2_font font = { glyphs, sizeof(glyphs), 128, 16, 8, 16 };
+    struct ios_graphics_surface surface = { pixels, 320, 220, 320 };
+    struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
     struct ios_file_explorer_window window;
     bool activated;
     ios_u64 handle;
@@ -236,8 +238,8 @@ static void test_pointer_keyboard_navigation_and_rendering_use_safe_model(void)
         .type = IOS_INPUT_EVENT_POINTER_BUTTON,
         .flags = IOS_INPUT_PRESSED,
         .code = IOS_POINTER_BUTTON_LEFT,
-        .x = 10,
-        .y = 25
+        .x = IOS_FILE_EXPLORER_CELL_WIDTH + 1,
+        .y = IOS_FILE_EXPLORER_HEADER_HEIGHT + 1
     };
     struct ios_input_event enter = {
         .type = IOS_INPUT_EVENT_KEY, .flags = IOS_INPUT_PRESSED, .code = IOS_KEY_ENTER
@@ -253,13 +255,84 @@ static void test_pointer_keyboard_navigation_and_rendering_use_safe_model(void)
         ios_file_explorer_window_handle_input(&window, &enter, &activated, &handle), IOS_OK);
     IOS_TEST_ASSERT(activated && handle == 9);
     IOS_TEST_ASSERT_STATUS(ios_file_explorer_window_render(&window), IOS_OK);
-    IOS_TEST_ASSERT(pixels[20 * 80] == window.selection_color);
+    IOS_TEST_ASSERT(
+        pixels[(IOS_FILE_EXPLORER_HEADER_HEIGHT + 2) * 320
+            + IOS_FILE_EXPLORER_CELL_WIDTH + 2] == window.selection_color
+    );
+    /* Text, generic-file, and folder entries use visibly distinct glyphs. */
+    IOS_TEST_ASSERT(pixels[34 * 320 + 35] != pixels[34 * 320 + 131]);
+    IOS_TEST_ASSERT(pixels[45 * 320 + 225] != pixels[34 * 320 + 35]);
+    IOS_TEST_ASSERT(pixels[45 * 320 + 225] != pixels[34 * 320 + 131]);
 
     IOS_TEST_ASSERT_STATUS(ios_file_explorer_model_select(&model, 2), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_file_explorer_model_activate(&model, &handle), IOS_OK);
     IOS_TEST_ASSERT(handle == 11 && model.directory_handle == 11 && model.entry_count == 1);
     IOS_TEST_ASSERT_STATUS(ios_file_explorer_model_navigate_back(&model), IOS_OK);
     IOS_TEST_ASSERT(model.directory_handle == 1 && model.entry_count == 3);
+}
+
+static void test_icon_grid_renders_all_presentations_and_scrolls_by_rows(void)
+{
+    struct fake_view_provider fake;
+    struct ios_file_explorer_model model;
+    ios_type_icon_capability image_capability;
+    ios_type_icon_capability application_capability;
+    ios_u32 pixels[320 * 220] = { 0 };
+    ios_u8 glyphs[128 * 16] = { 0 };
+    struct ios_graphics_surface surface = { pixels, 320, 220, 320 };
+    struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
+    struct ios_file_explorer_window window;
+    bool activated;
+    ios_u64 handle;
+    const struct ios_input_event down = {
+        .type = IOS_INPUT_EVENT_KEY, .flags = IOS_INPUT_PRESSED, .code = IOS_KEY_DOWN
+    };
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_model_initialize(&model, make_fake_provider(&fake), 1), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_type_catalog_register(
+            &fake.catalog, UINT64_C(0x2002), IOS_ICON_IMAGE, &image_capability
+        ), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_type_catalog_register(
+            &fake.catalog, UINT64_C(0x3003), IOS_ICON_APPLICATION,
+            &application_capability
+        ), IOS_OK);
+    model.entries[0] = fake_entry(
+        "TEXT", 20, fake.text_capability, IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entries[1] = fake_entry(
+        "IMAGE", 21, image_capability, IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entries[2] = fake_entry(
+        "PROGRAM", 22, application_capability, IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entries[3] = fake_entry("FOLDER", 23, 0, IOS_DISPLAY_SAFE_DIRECTORY);
+    model.entries[4] = fake_entry(
+        "ARCHIVE", 24, UINT64_C(0xabcdef), IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entries[5] = fake_entry(
+        "DATA", 25, UINT64_C(0xabcdef), IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entries[6] = fake_entry(
+        "MORE", 26, UINT64_C(0xabcdef), IOS_DISPLAY_SAFE_REGULAR_FILE);
+    model.entry_count = 7;
+    model.has_selection = false;
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_initialize(&window, &model, surface, &font), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(ios_file_explorer_window_render(&window), IOS_OK);
+    IOS_TEST_ASSERT(pixels[34 * 320 + 35] == UINT32_C(0x004f81bd));
+    IOS_TEST_ASSERT(pixels[34 * 320 + 131] == UINT32_C(0x003e9b52));
+    IOS_TEST_ASSERT(pixels[35 * 320 + 225] == UINT32_C(0x00934db1));
+    IOS_TEST_ASSERT(pixels[137 * 320 + 33] == UINT32_C(0x00d6a832));
+    IOS_TEST_ASSERT(pixels[126 * 320 + 131] == UINT32_C(0x00808080));
+
+    IOS_TEST_ASSERT_STATUS(ios_file_explorer_model_select(&model, 0), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &down, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(model.selected_index == 3 && window.first_visible_index == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &down, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(model.selected_index == 6 && window.first_visible_index == 3);
 }
 
 static void test_controller_navigates_and_mutates_through_opaque_provider(void)
@@ -342,6 +415,7 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_catalog_tokens_are_opaque_and_registration_is_stable),
     IOS_TEST_CASE(test_injected_provider_builds_safe_selectable_model_and_properties),
     IOS_TEST_CASE(test_pointer_keyboard_navigation_and_rendering_use_safe_model),
+    IOS_TEST_CASE(test_icon_grid_renders_all_presentations_and_scrolls_by_rows),
     IOS_TEST_CASE(test_controller_navigates_and_mutates_through_opaque_provider),
     IOS_TEST_CASE(test_controller_enforces_rights_and_preserves_view_on_provider_failure)
 };

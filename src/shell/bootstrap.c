@@ -5,14 +5,13 @@ static ios_status gui_command(
 )
 {
     (void)arguments;
-    if (argument_count != 1 || io->shell_context == NULL) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
+    if (argument_count != 1) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (io == NULL || io->shell_context == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     return ios_shell_start_gui(io->shell_context);
 }
 
 static const struct ios_cui_command gui_descriptor = {
-    "gui", "start the graphical desktop", gui_command
+    "gui", "start the graphical desktop", "gui", gui_command
 };
 
 ios_status ios_shell_bootstrap(

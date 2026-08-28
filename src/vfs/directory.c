@@ -1,5 +1,7 @@
 #include <inferenceos/vfs.h>
 
+#include <inferenceos/runtime.h>
+
 struct path_leaf {
     char normalized[IOS_VFS_PATH_CAPACITY];
     char parent[IOS_VFS_PATH_CAPACITY];
@@ -57,6 +59,26 @@ static ios_status finish_operation(struct ios_vfs_mount *mount, ios_status statu
     const ios_status end_status = vfs_mount_end_operation(mount);
     if (IOS_FAILED(status)) return status;
     return end_status;
+}
+
+static bool valid_search_path(const struct ios_vfs_search_result *entry)
+{
+    ios_size length;
+    if (entry == NULL || entry->object_identity == 0
+        || entry->display_path_length == 0
+        || entry->display_path_length > IOS_VFS_PATH_MAX
+        || *entry->display_path != '/') {
+        return false;
+    }
+    for (length = 0; length <= IOS_VFS_PATH_MAX; ++length) {
+        const ios_u8 byte = (ios_u8)entry->display_path[length];
+        if (byte == 0) break;
+        if (byte < 0x20 || byte == 0x7f || byte == '\\' || byte == '.') return false;
+        if (byte == '/' && length != 0 && entry->display_path[length - 1] == '/') {
+            return false;
+        }
+    }
+    return length == entry->display_path_length && length <= IOS_VFS_PATH_MAX;
 }
 
 ios_status vfs_create_directory(
@@ -136,6 +158,57 @@ ios_status vfs_list_directory(
         context->mount, directory.identity, continuation, entries,
         capacity, entry_count, next_continuation
     );
+}
+
+ios_status vfs_search_extension(
+    struct ios_vfs_mount *mount,
+    const char *extension,
+    ios_size extension_length,
+    struct ios_vfs_search_result *entries,
+    ios_size capacity,
+    ios_size *entry_count,
+    bool *truncated
+)
+{
+    ios_status status;
+    if (mount == NULL || extension == NULL || extension_length == 0
+        || entries == NULL || capacity == 0
+        || capacity > IOS_VFS_SEARCH_RESULT_CAPACITY || entry_count == NULL
+        || truncated == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    *entry_count = 0;
+    *truncated = false;
+    memset(entries, 0, capacity * sizeof(*entries));
+    if (mount->search_extension == NULL) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    status = vfs_mount_begin_operation(mount, false);
+    if (IOS_FAILED(status)) return status;
+    status = mount->search_extension(
+        mount->driver_context, extension, extension_length,
+        entries, capacity, entry_count, truncated
+    );
+    status = finish_operation(mount, status);
+    if (IOS_FAILED(status)) {
+        memset(entries, 0, capacity * sizeof(*entries));
+        *entry_count = 0;
+        *truncated = false;
+        return status;
+    }
+    if (*entry_count > capacity || (*truncated && *entry_count != capacity)) {
+        memset(entries, 0, capacity * sizeof(*entries));
+        *entry_count = 0;
+        *truncated = false;
+        return IOS_ERROR(IOS_E_PROTOCOL);
+    }
+    for (ios_size index = 0; index < *entry_count; ++index) {
+        if (!valid_search_path(&entries[index])) {
+            memset(entries, 0, capacity * sizeof(*entries));
+            *entry_count = 0;
+            *truncated = false;
+            return IOS_ERROR(IOS_E_PROTOCOL);
+        }
+    }
+    return IOS_OK;
 }
 
 static bool path_is_descendant(const char *ancestor, const char *candidate)

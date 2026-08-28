@@ -157,8 +157,13 @@ static ios_status parse_fadt(
     const ios_u32 timer_32_bit_flag = UINT32_C(1) << 8;
     ios_u32 flags;
 
-    if (!table_is_valid(&fadt->header) || fadt->header.length < 116
-        || fadt->pm_timer_block == 0 || fadt->pm_timer_block > UINT16_MAX
+    if (!table_is_valid(&fadt->header) || fadt->header.length < 116) {
+        return IOS_ERROR(IOS_E_CORRUPT);
+    }
+    if (fadt->pm_timer_block == 0 || fadt->pm_timer_length == 0) {
+        return IOS_ERROR(IOS_E_NOT_FOUND);
+    }
+    if (fadt->pm_timer_block > UINT16_MAX
         || fadt->pm_timer_length < sizeof(ios_u32)) {
         return IOS_ERROR(IOS_E_NOT_SUPPORTED);
     }
@@ -217,11 +222,23 @@ ios_status x86_64_acpi_discover(
             }
             found_madt = true;
         } else if (bytes_equal(table->signature, "FACP", 4)) {
-            if (IOS_FAILED(parse_fadt((const void *)table, platform))) {
-                return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+            const ios_status fadt_status = parse_fadt((const void *)table, platform);
+            if (fadt_status == IOS_ERROR(IOS_E_NOT_FOUND)) {
+                continue;
+            }
+            if (IOS_FAILED(fadt_status)) {
+                return fadt_status;
             }
             found_fadt = true;
         }
     }
-    return found_madt && found_fadt ? IOS_OK : IOS_ERROR(IOS_E_NOT_FOUND);
+    /*
+     * A MADT is required to initialize the local APIC.  The FADT PM timer is
+     * optional because Hyper-V Generation 2 supplies its architectural
+     * partition reference counter instead of a legacy ACPI PM timer.
+     * Timer initialization rejects the platform later unless one of those
+     * bounded calibration clocks is available.
+     */
+    (void)found_fadt;
+    return found_madt ? IOS_OK : IOS_ERROR(IOS_E_NOT_FOUND);
 }

@@ -86,6 +86,19 @@ set(
     CACHE FILEPATH
     "Pinned qemu-system-x86_64 executable; empty uses launcher discovery"
 )
+if(INFERENCEOS_QEMU_EXECUTABLE STREQUAL "")
+    find_program(_inferenceos_detected_qemu NAMES qemu-system-x86_64)
+    if(_inferenceos_detected_qemu)
+        set(
+            INFERENCEOS_QEMU_EXECUTABLE
+            "${_inferenceos_detected_qemu}"
+            CACHE FILEPATH
+            "Pinned qemu-system-x86_64 executable; empty uses launcher discovery"
+            FORCE
+        )
+    endif()
+    unset(_inferenceos_detected_qemu)
+endif()
 set(
     INFERENCEOS_QEMU_TIMEOUT_SECONDS
     60
@@ -134,6 +147,8 @@ add_library(
         src/arch/x86_64/acpi.c
         src/arch/x86_64/apic_timer.c
         src/arch/x86_64/gdt.c
+        src/arch/x86_64/hyperv.c
+        src/arch/x86_64/hypercall.S
         src/arch/x86_64/interrupts.c
         src/arch/x86_64/io.c
         src/arch/x86_64/pci.c
@@ -258,6 +273,7 @@ add_library(
         src/drivers/framebuffer/gop.c
         src/gui/graphics/primitives.c
         src/gui/graphics/text.c
+        src/gui/graphics/text_console.c
 )
 add_library(InferenceOS::Graphics ALIAS inferenceos_graphics)
 target_include_directories(
@@ -611,16 +627,33 @@ add_library(
     inferenceos_block STATIC
         src/block/device.c
         src/block/cache.c
+        src/block/disk_safety.c
+        src/block/platform.c
         src/block/platform_q35.c
+        src/block/platform_hyperv.c
+        src/drivers/hyperv/protocol.c
+        src/drivers/hyperv/ring.c
+        src/drivers/hyperv/vmbus.c
+        src/drivers/hyperv/storvsc.c
+        src/drivers/hyperv/input.c
 )
 add_library(InferenceOS::Block ALIAS inferenceos_block)
 target_include_directories(
     inferenceos_block
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/block/include"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/drivers/virtio_blk/include"
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/block/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/drivers/hyperv/include"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/drivers/virtio_blk/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/input/include"
 )
 target_link_libraries(
-    inferenceos_block PUBLIC InferenceOS::KernelHeaders InferenceOS::Runtime
+    inferenceos_block
+    PUBLIC
+        InferenceOS::ArchX86_64
+        InferenceOS::KernelHeaders
+        InferenceOS::Memory
+        InferenceOS::Runtime
 )
 inferenceos_configure_freestanding_target(inferenceos_block)
 target_link_libraries(
@@ -628,7 +661,7 @@ target_link_libraries(
     PUBLIC InferenceOS::ArchX86_64 InferenceOS::Block
 )
 
-add_library(inferenceos_power STATIC src/kernel/power.c)
+add_library(inferenceos_power STATIC src/kernel/power.c src/kernel/power_uefi.c)
 add_library(InferenceOS::Power ALIAS inferenceos_power)
 target_link_libraries(
     inferenceos_power
@@ -665,6 +698,7 @@ add_library(
         src/filesystems/inferenceos_fs/directory.c
         src/filesystems/inferenceos_fs/subdirectory.c
         src/filesystems/inferenceos_fs/file.c
+        src/filesystems/inferenceos_fs/file_service.c
         src/filesystems/inferenceos_fs/transaction.c
         src/filesystems/inferenceos_fs/sync.c
         src/filesystems/inferenceos_fs/formatter.c
@@ -739,6 +773,7 @@ add_library(
     STATIC
         src/kernel/syscall/entry.S
         src/kernel/syscall/dispatch.c
+        src/kernel/syscall/extension_search.c
         src/kernel/syscall/file_view.c
         src/kernel/syscall/fs_diagnostic.c
         src/kernel/syscall/gui_view.c
@@ -769,13 +804,17 @@ if(CMAKE_CROSSCOMPILING)
     set(_inferenceos_application_directory
         "${INFERENCEOS_ARTIFACT_DIRECTORY}/applications")
     set(_inferenceos_font_directory "${INFERENCEOS_ARTIFACT_DIRECTORY}/fonts")
-    set(_inferenceos_font_file "${_inferenceos_font_directory}/inferenceos-8x16.psf2")
+    set(_inferenceos_font_file
+        "${_inferenceos_font_directory}/inferenceos-console-12x24.alpha4")
     set(_inferenceos_font_c_source "${CMAKE_CURRENT_BINARY_DIR}/generated/inferenceos_font.c")
     set(_inferenceos_font_license "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/LICENSE.txt")
+    set(_inferenceos_font_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/inferenceos-console-alpha4.rle.b64")
     inferenceos_powershell_path(
         _inferenceos_ps_build_font
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_psf2_font.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_alpha4_font.ps1"
     )
+    inferenceos_powershell_path(_inferenceos_ps_font_source "${_inferenceos_font_source}")
     inferenceos_powershell_path(_inferenceos_ps_font_file "${_inferenceos_font_file}")
     inferenceos_powershell_path(_inferenceos_ps_font_c_source "${_inferenceos_font_c_source}")
     inferenceos_powershell_path(_inferenceos_ps_font_license "${_inferenceos_font_license}")
@@ -785,14 +824,16 @@ if(CMAKE_CROSSCOMPILING)
             "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
             -NoProfile
             -File "${_inferenceos_ps_build_font}"
+            -SourcePath "${_inferenceos_ps_font_source}"
             -OutputPath "${_inferenceos_ps_font_file}"
             -CSourcePath "${_inferenceos_ps_font_c_source}"
             -LicensePath "${_inferenceos_ps_font_license}"
             -Force
         DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_psf2_font.ps1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_alpha4_font.ps1"
+            "${_inferenceos_font_source}"
             "${_inferenceos_font_license}"
-        COMMENT "Generating the licensed 8x16 PSF2 font asset"
+        COMMENT "Generating the licensed antialiased 12x24 console font asset"
         VERBATIM
     )
     set_source_files_properties("${_inferenceos_font_c_source}" PROPERTIES GENERATED TRUE)
@@ -982,7 +1023,7 @@ if(CMAKE_CROSSCOMPILING)
     { "application_identity": 4102, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_custom_test_application", "source": "applications/custom-test.elf", "esp_path": "/InferenceOS/System/custom-test.elf" }
   ],
   "assets": [
-    { "kind": "psf2_font", "source": "fonts/inferenceos-8x16.psf2", "esp_path": "/InferenceOS/System/inferenceos-8x16.psf2", "license": "MIT", "license_source": "assets/fonts/LICENSE.txt" }
+    { "kind": "alpha4_font", "source": "fonts/inferenceos-console-12x24.alpha4", "esp_path": "/InferenceOS/System/inferenceos-console-12x24.alpha4", "license": "OFL-1.1", "license_source": "assets/fonts/LICENSE.txt" }
   ]
 }
 ]=])
@@ -1006,6 +1047,8 @@ set(
 )
 set(_inferenceos_esp_image "${INFERENCEOS_ARTIFACT_DIRECTORY}/inferenceos-esp.img")
 set(_inferenceos_test_disk "${INFERENCEOS_ARTIFACT_DIRECTORY}/inferenceos-persistent.raw")
+set(_inferenceos_hyperv_boot_vhdx "${INFERENCEOS_ARTIFACT_DIRECTORY}/inferenceos-hyperv-boot.vhdx")
+set(_inferenceos_hyperv_data_vhdx "${INFERENCEOS_ARTIFACT_DIRECTORY}/inferenceos-hyperv-data.vhdx")
 set(_inferenceos_qemu_artifacts "${CMAKE_BINARY_DIR}/qemu-tests")
 set(_inferenceos_artifact_manifest_artifacts "${CMAKE_BINARY_DIR}/system/artifact-manifest")
 
@@ -1020,6 +1063,14 @@ inferenceos_powershell_path(
 inferenceos_powershell_path(
     _inferenceos_ps_create_disk
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/create_persistent_disk.ps1"
+)
+inferenceos_powershell_path(
+    _inferenceos_ps_build_hyperv_boot
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_hyperv_boot_vhdx.ps1"
+)
+inferenceos_powershell_path(
+    _inferenceos_ps_create_hyperv_data
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/create_hyperv_data_vhdx.ps1"
 )
 inferenceos_powershell_path(
     _inferenceos_ps_run
@@ -1074,6 +1125,10 @@ inferenceos_powershell_path(
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/registry_benchmark_report_test.ps1"
 )
 inferenceos_powershell_path(
+    _inferenceos_ps_registry_benchmark_qemu_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/registry_benchmark_qemu_test.ps1"
+)
+inferenceos_powershell_path(
     _inferenceos_ps_generate_validation_report
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/generate_validation_report.ps1"
 )
@@ -1097,12 +1152,18 @@ inferenceos_powershell_path(
     _inferenceos_ps_validation_report_contract_artifacts
     "${CMAKE_BINARY_DIR}/system/validation-report-contract"
 )
+inferenceos_powershell_path(
+    _inferenceos_ps_qemu_profile_contract_artifacts
+    "${CMAKE_BINARY_DIR}/system/qemu-profile-contract"
+)
 inferenceos_powershell_path(_inferenceos_ps_module_definition "${INFERENCEOS_SYSTEM_MODULE_DEFINITION}")
 inferenceos_powershell_path(_inferenceos_ps_module_directory "${_inferenceos_module_directory}")
 inferenceos_powershell_path(_inferenceos_ps_loader "${INFERENCEOS_UEFI_LOADER_FILE}")
 inferenceos_powershell_path(_inferenceos_ps_kernel "${INFERENCEOS_KERNEL_ELF_FILE}")
 inferenceos_powershell_path(_inferenceos_ps_esp "${_inferenceos_esp_image}")
 inferenceos_powershell_path(_inferenceos_ps_disk "${_inferenceos_test_disk}")
+inferenceos_powershell_path(_inferenceos_ps_hyperv_boot "${_inferenceos_hyperv_boot_vhdx}")
+inferenceos_powershell_path(_inferenceos_ps_hyperv_data "${_inferenceos_hyperv_data_vhdx}")
 inferenceos_powershell_path(_inferenceos_ps_qemu_artifacts "${_inferenceos_qemu_artifacts}")
 inferenceos_powershell_path(
     _inferenceos_ps_registry_benchmark_artifacts
@@ -1255,7 +1316,7 @@ if(INFERENCEOS_BUILD_HOST_TESTS)
             -NoProfile
             -File "${_inferenceos_ps_qemu_profile_test}"
             -RepositoryRoot "${_inferenceos_ps_repository_root}"
-            -ArtifactDirectory "${CMAKE_BINARY_DIR}/system/qemu-profile-contract"
+            -ArtifactDirectory "${_inferenceos_ps_qemu_profile_contract_artifacts}"
     )
     set_tests_properties(
         qemu-profile-system
@@ -1334,7 +1395,7 @@ add_custom_command(
     OUTPUT "${_inferenceos_module_manifest}"
     BYPRODUCTS
         "${_inferenceos_module_hashes}"
-        "${_inferenceos_module_directory}/InferenceOS/System/inferenceos-8x16.psf2"
+        "${_inferenceos_module_directory}/InferenceOS/System/inferenceos-console-12x24.alpha4"
         "${_inferenceos_module_directory}/InferenceOS/System/shell.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/gui-desktop.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/gui-terminal.elf"
@@ -1395,6 +1456,40 @@ add_custom_command(
     VERBATIM
 )
 add_custom_target(inferenceos-test-disk DEPENDS "${_inferenceos_test_disk}")
+
+add_custom_command(
+    OUTPUT "${_inferenceos_hyperv_boot_vhdx}"
+    COMMAND
+        "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -File "${_inferenceos_ps_build_hyperv_boot}"
+        -LoaderPath "${_inferenceos_ps_loader}"
+        -KernelPath "${_inferenceos_ps_kernel}"
+        -ModuleDirectory "${_inferenceos_ps_module_directory}"
+        -OutputPath "${_inferenceos_ps_hyperv_boot}"
+        -Force
+    DEPENDS
+        inferenceos-image
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/build_hyperv_boot_vhdx.ps1"
+    COMMENT "Building the Generation 2 Hyper-V GPT/ESP boot VHDX (requires elevated Windows PowerShell)"
+    VERBATIM
+)
+add_custom_command(
+    OUTPUT "${_inferenceos_hyperv_data_vhdx}"
+    COMMAND
+        "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -File "${_inferenceos_ps_create_hyperv_data}"
+        -OutputPath "${_inferenceos_ps_hyperv_data}"
+        -Force
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/image/create_hyperv_data_vhdx.ps1"
+    COMMENT "Creating the unpartitioned 64 GiB Hyper-V data VHDX"
+    VERBATIM
+)
+add_custom_target(
+    inferenceos-hyperv-images
+    DEPENDS "${_inferenceos_hyperv_boot_vhdx}" "${_inferenceos_hyperv_data_vhdx}"
+)
 
 set(_inferenceos_qemu_common_arguments
     -EspPath "${_inferenceos_ps_esp}"
@@ -1542,6 +1637,25 @@ add_custom_target(
     DEPENDS test-gui test-format-mount test-reboot-persistence test-directory-interop
 )
 add_custom_target(
+    benchmark-registry-qemu
+    COMMAND
+        "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -File "${_inferenceos_ps_registry_benchmark_qemu_test}"
+        ${_inferenceos_qemu_common_arguments}
+        -ArtifactDirectory "${_inferenceos_ps_registry_benchmark_artifacts}"
+    DEPENDS
+        inferenceos-image
+        inferenceos-test-disk
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/registry_benchmark_qemu_test.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/run_inferenceos.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/run_qemu_tests.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/run_registry_benchmark.ps1"
+    COMMENT "Running the matched registry benchmark under QEMU TCG"
+    USES_TERMINAL
+    VERBATIM
+)
+add_custom_target(
     inferenceos-release-validation
     COMMAND
         "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
@@ -1591,6 +1705,8 @@ unset(_inferenceos_ps_boot_gui_tests)
 unset(_inferenceos_ps_format_mount_test)
 unset(_inferenceos_ps_file_explorer_test)
 unset(_inferenceos_ps_bootstrap_test)
+unset(_inferenceos_ps_qemu_profile_test)
+unset(_inferenceos_ps_qemu_profile_contract_artifacts)
 unset(_inferenceos_ps_artifact_manifest_test)
 unset(_inferenceos_ps_reboot_persistence_test)
 unset(_inferenceos_ps_dependency_validation_evidence)
@@ -1600,6 +1716,7 @@ unset(_inferenceos_ps_generate_validation_report)
 unset(_inferenceos_ps_validation_report_test)
 unset(_inferenceos_ps_registry_benchmark)
 unset(_inferenceos_ps_registry_benchmark_test)
+unset(_inferenceos_ps_registry_benchmark_qemu_test)
 unset(_inferenceos_ps_module_definition)
 unset(_inferenceos_ps_module_directory)
 unset(_inferenceos_ps_loader)

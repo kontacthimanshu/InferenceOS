@@ -8,13 +8,8 @@
 struct ios_terminal {
     struct ios_window_manager *window_manager;
     struct ios_window_handle window;
-    struct ios_graphics_surface surface;
-    const struct ios_psf2_font *font;
+    struct ios_graphics_text_console text_console;
     struct ios_cui_console console;
-    ios_u32 foreground;
-    ios_u32 background;
-    ios_i32 cursor_column;
-    ios_i32 cursor_row;
     bool active;
 };
 

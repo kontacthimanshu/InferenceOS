@@ -48,6 +48,22 @@ struct efi_memory_descriptor {
     ios_u64 attributes;
 };
 
+struct efi_device_path_protocol {
+    ios_u8 type;
+    ios_u8 subtype;
+    ios_u8 length[2];
+};
+
+struct IOS_PACKED efi_hard_drive_device_path {
+    struct efi_device_path_protocol header;
+    ios_u32 partition_number;
+    ios_u64 partition_start;
+    ios_u64 partition_size;
+    ios_u8 partition_signature[16];
+    ios_u8 partition_format;
+    ios_u8 signature_type;
+};
+
 struct efi_simple_text_output_protocol;
 typedef efi_status (IOS_UEFI_API *efi_output_string)(
     struct efi_simple_text_output_protocol *, const efi_char16 *
@@ -167,6 +183,27 @@ struct efi_boot_services {
     efi_locate_protocol locate_protocol;
 };
 
+typedef void (IOS_UEFI_API *efi_reset_system)(
+    ios_u32 reset_type, efi_status reset_status, efi_uintn data_size, void *reset_data
+);
+struct efi_runtime_services {
+    struct efi_table_header header;
+    void *get_time;
+    void *set_time;
+    void *get_wakeup_time;
+    void *set_wakeup_time;
+    void *set_virtual_address_map;
+    void *convert_pointer;
+    void *get_variable;
+    void *get_next_variable_name;
+    void *set_variable;
+    void *get_next_high_monotonic_count;
+    efi_reset_system reset_system;
+    void *update_capsule;
+    void *query_capsule_capabilities;
+    void *query_variable_info;
+};
+
 struct efi_system_table {
     struct efi_table_header header;
     efi_char16 *firmware_vendor;
@@ -177,7 +214,7 @@ struct efi_system_table {
     struct efi_simple_text_output_protocol *console_out;
     efi_handle standard_error_handle;
     struct efi_simple_text_output_protocol *standard_error;
-    void *runtime_services;
+    struct efi_runtime_services *runtime_services;
     struct efi_boot_services *boot_services;
     efi_uintn configuration_table_count;
     struct efi_configuration_table *configuration_table;
@@ -198,6 +235,7 @@ extern const struct efi_guid ios_efi_loaded_image_guid;
 extern const struct efi_guid ios_efi_simple_file_system_guid;
 extern const struct efi_guid ios_efi_file_info_guid;
 extern const struct efi_guid ios_efi_graphics_output_guid;
+extern const struct efi_guid ios_efi_device_path_guid;
 extern const struct efi_guid ios_efi_acpi_20_table_guid;
 extern const struct efi_guid ios_efi_acpi_table_guid;
 

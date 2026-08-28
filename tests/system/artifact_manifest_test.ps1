@@ -42,7 +42,8 @@ function Assert-ZeroSamples([string]$Path) {
 
 $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
 $moduleBuilder = Join-Path $root 'tools/image/build_system_modules.ps1'
-$fontBuilder = Join-Path $root 'tools/image/build_psf2_font.ps1'
+$fontBuilder = Join-Path $root 'tools/image/build_alpha4_font.ps1'
+$fontSource = Join-Path $root 'assets/fonts/inferenceos-console-alpha4.rle.b64'
 $espBuilder = Join-Path $root 'tools/image/build_esp.ps1'
 $diskBuilder = Join-Path $root 'tools/image/create_persistent_disk.ps1'
 $artifactRoot = if ([string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
@@ -55,10 +56,18 @@ $shell = Join-Path $inputs 'shell.elf'
 $explorer = Join-Path $inputs 'explorer.elf'
 New-StaticElf64 $shell 0x51
 New-StaticElf64 $explorer 0xa7
-$font = Join-Path $inputs 'inferenceos-8x16.psf2'
+$font = Join-Path $inputs 'inferenceos-console-12x24.alpha4'
 $fontC = Join-Path $inputs 'inferenceos-font.c'
-& $fontBuilder -OutputPath $font -CSourcePath $fontC `
+& $fontBuilder -SourcePath $fontSource -OutputPath $font -CSourcePath $fontC `
     -LicensePath (Join-Path $root 'assets/fonts/LICENSE.txt')
+$fontBytes = [System.IO.File]::ReadAllBytes($font)
+$uppercaseA = [byte[]]::new(144)
+$lowercaseA = [byte[]]::new(144)
+[Array]::Copy($fontBytes, 32 + [int][char]'A' * 144, $uppercaseA, 0, 144)
+[Array]::Copy($fontBytes, 32 + [int][char]'a' * 144, $lowercaseA, 0, 144)
+if ([Convert]::ToBase64String($uppercaseA) -ceq [Convert]::ToBase64String($lowercaseA)) {
+    throw 'The generated console font does not preserve distinct lowercase glyphs.'
+}
 $definitionPath = Join-Path $inputs 'modules.json'
 $definition = [ordered]@{
     schema_version = 1
@@ -67,7 +76,7 @@ $definition = [ordered]@{
         [ordered]@{ application_identity = 10; role = 'shell'; required = $true; entry_abi_version = 1; source = 'shell.elf'; esp_path = '/InferenceOS/System/shell.elf' }
     )
     assets = @(
-        [ordered]@{ kind = 'psf2_font'; source = 'inferenceos-8x16.psf2'; esp_path = '/InferenceOS/System/inferenceos-8x16.psf2'; license = 'MIT' }
+        [ordered]@{ kind = 'alpha4_font'; source = 'inferenceos-console-12x24.alpha4'; esp_path = '/InferenceOS/System/inferenceos-console-12x24.alpha4'; license = 'OFL-1.1' }
     )
 }
 [System.IO.File]::WriteAllText(
@@ -116,13 +125,13 @@ if (-not [System.IO.File]::Exists($firstHashes) -or
 }
 $hashLines = @(Get-Content -LiteralPath $firstHashes)
 if ($hashLines.Count -ne 5 -or $hashLines[0] -cne 'INFERENCEOS-SYSTEM-HASHES|1' -or
-    -not ($hashLines -match '/InferenceOS/System/inferenceos-8x16[.]psf2$')) {
-    throw 'System hashes do not cover the modules, manifest, and licensed PSF2 font.'
+    -not ($hashLines -match '/InferenceOS/System/inferenceos-console-12x24[.]alpha4$')) {
+    throw 'System hashes do not cover the modules, manifest, and licensed alpha font.'
 }
-$packagedFont = Join-Path $firstModules 'InferenceOS/System/inferenceos-8x16.psf2'
+$packagedFont = Join-Path $firstModules 'InferenceOS/System/inferenceos-console-12x24.alpha4'
 if ((Get-FileHash $packagedFont -Algorithm SHA256).Hash -cne
     (Get-FileHash $font -Algorithm SHA256).Hash) {
-    throw 'The packaged PSF2 font differs from its generated target asset.'
+    throw 'The packaged alpha font differs from its generated target asset.'
 }
 
 $loader = Join-Path $inputs 'loader.efi'

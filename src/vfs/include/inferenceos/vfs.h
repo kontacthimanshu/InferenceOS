@@ -11,7 +11,8 @@ enum {
     IOS_VFS_DISPLAY_NAME_CAPACITY = 64,
     IOS_VFS_PATH_MAX = 255,
     IOS_VFS_PATH_CAPACITY = IOS_VFS_PATH_MAX + 1,
-    IOS_VFS_MAX_DIRECTORY_LEVELS = 16
+    IOS_VFS_MAX_DIRECTORY_LEVELS = 16,
+    IOS_VFS_SEARCH_RESULT_CAPACITY = 16
 };
 
 enum ios_mount_state {
@@ -55,6 +56,12 @@ struct ios_vfs_directory_entry {
     enum ios_vfs_object_kind kind;
 };
 
+struct ios_vfs_search_result {
+    char display_path[IOS_VFS_PATH_CAPACITY];
+    ios_u64 object_identity;
+    ios_size display_path_length;
+};
+
 typedef ios_status (*ios_vfs_enumerate_function)(
     void *driver_context,
     ios_u64 directory_identity,
@@ -93,6 +100,15 @@ typedef ios_status (*ios_vfs_rename_function)(
     const char *destination_component,
     ios_size destination_component_length
 );
+typedef ios_status (*ios_vfs_search_extension_function)(
+    void *driver_context,
+    const char *extension,
+    ios_size extension_length,
+    struct ios_vfs_search_result *entries,
+    ios_size capacity,
+    ios_size *entry_count,
+    bool *truncated
+);
 
 typedef ios_status (*ios_vfs_unmount_sync_function)(void *context);
 typedef void (*ios_vfs_unmount_invalidate_function)(void *context);
@@ -113,6 +129,7 @@ struct ios_vfs_mount {
     ios_vfs_create_directory_function create_directory;
     ios_vfs_remove_directory_function remove_directory;
     ios_vfs_rename_function rename;
+    ios_vfs_search_extension_function search_extension;
     enum ios_mount_state state;
     void *unmount_context;
     ios_vfs_unmount_sync_function unmount_sync;
@@ -184,6 +201,15 @@ ios_status vfs_rename(
     const struct ios_vfs_path_context *context,
     const char *source,
     const char *destination
+);
+ios_status vfs_search_extension(
+    struct ios_vfs_mount *mount,
+    const char *extension,
+    ios_size extension_length,
+    struct ios_vfs_search_result *entries,
+    ios_size capacity,
+    ios_size *entry_count,
+    bool *truncated
 );
 ios_status vfs_mount_root(
     struct ios_vfs_mount_registry *registry, struct ios_vfs_mount *mount, const char *path

@@ -10,8 +10,14 @@ enum {
     TEST_WIDTH = 12,
     TEST_HEIGHT = 20,
     TEST_STRIDE = 16,
+    CONSOLE_WIDTH = 24,
+    CONSOLE_HEIGHT = 32,
+    CONSOLE_STRIDE = 28,
     TEST_FONT_GLYPHS = 128,
-    TEST_FONT_SIZE = IOS_PSF2_HEADER_SIZE + TEST_FONT_GLYPHS * IOS_PSF2_FONT_HEIGHT
+    TEST_FONT_SIZE = IOS_PSF2_HEADER_SIZE + TEST_FONT_GLYPHS * IOS_PSF2_FONT_HEIGHT,
+    TEST_ALPHA4_GLYPH_BYTES = IOS_ALPHA4_FONT_WIDTH * IOS_ALPHA4_FONT_HEIGHT / 2,
+    TEST_ALPHA4_FONT_SIZE = IOS_ALPHA4_HEADER_SIZE
+        + TEST_FONT_GLYPHS * TEST_ALPHA4_GLYPH_BYTES
 };
 
 static void write_u32_le(ios_u8 *bytes, ios_u32 value)
@@ -34,6 +40,94 @@ static void make_test_font(ios_u8 *bytes)
     write_u32_le(bytes + 24, IOS_PSF2_FONT_HEIGHT);
     write_u32_le(bytes + 28, IOS_PSF2_FONT_WIDTH);
     bytes[IOS_PSF2_HEADER_SIZE + 'A' * IOS_PSF2_FONT_HEIGHT] = UINT8_C(0x80);
+    bytes[IOS_PSF2_HEADER_SIZE + 'B' * IOS_PSF2_FONT_HEIGHT] = UINT8_C(0x40);
+    bytes[IOS_PSF2_HEADER_SIZE + 'C' * IOS_PSF2_FONT_HEIGHT] = UINT8_C(0x20);
+}
+
+static void make_test_alpha4_font(ios_u8 *bytes)
+{
+    memset(bytes, 0, TEST_ALPHA4_FONT_SIZE);
+    write_u32_le(bytes, IOS_ALPHA4_MAGIC);
+    write_u32_le(bytes + 4, 0);
+    write_u32_le(bytes + 8, IOS_ALPHA4_HEADER_SIZE);
+    write_u32_le(bytes + 12, 0);
+    write_u32_le(bytes + 16, TEST_FONT_GLYPHS);
+    write_u32_le(bytes + 20, TEST_ALPHA4_GLYPH_BYTES);
+    write_u32_le(bytes + 24, IOS_ALPHA4_FONT_HEIGHT);
+    write_u32_le(bytes + 28, IOS_ALPHA4_FONT_WIDTH);
+    bytes[IOS_ALPHA4_HEADER_SIZE + 'A' * TEST_ALPHA4_GLYPH_BYTES] = UINT8_C(0xf8);
+}
+
+static void test_text_console_renders_erases_and_clears(void)
+{
+    const ios_u32 foreground = UINT32_C(0x00f0f0f0);
+    const ios_u32 background = UINT32_C(0x00101010);
+    ios_u8 font_data[TEST_FONT_SIZE];
+    ios_u32 pixels[CONSOLE_STRIDE * CONSOLE_HEIGHT];
+    struct ios_graphics_surface surface = {
+        pixels, CONSOLE_WIDTH, CONSOLE_HEIGHT, CONSOLE_STRIDE
+    };
+    struct ios_psf2_font font;
+    struct ios_graphics_text_console console;
+
+    make_test_font(font_data);
+    IOS_TEST_ASSERT_STATUS(ios_psf2_open(font_data, sizeof(font_data), &font), IOS_OK);
+    memset(pixels, 0xcc, sizeof(pixels));
+    IOS_TEST_ASSERT_STATUS(
+        ios_graphics_text_console_initialize(
+            &console, surface, &font, foreground, background
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT(console.active && console.cursor_column == 0 && console.cursor_row == 0);
+    IOS_TEST_ASSERT(pixels[0] == background);
+    IOS_TEST_ASSERT(pixels[CONSOLE_WIDTH] == UINT32_C(0xcccccccc));
+
+    IOS_TEST_ASSERT_STATUS(ios_graphics_text_console_write(&console, "AB"), IOS_OK);
+    IOS_TEST_ASSERT(pixels[0] == foreground);
+    IOS_TEST_ASSERT(pixels[8] == background && pixels[9] == foreground);
+    IOS_TEST_ASSERT(console.cursor_column == 2 && console.cursor_row == 0);
+
+    IOS_TEST_ASSERT_STATUS(ios_graphics_text_console_write(&console, "\b \b"), IOS_OK);
+    IOS_TEST_ASSERT(pixels[9] == background);
+    IOS_TEST_ASSERT(console.cursor_column == 1 && console.cursor_row == 0);
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_graphics_text_console_write(&console, "\x1b[2J\x1b[H"), IOS_OK
+    );
+    IOS_TEST_ASSERT(console.cursor_column == 0 && console.cursor_row == 0);
+    IOS_TEST_ASSERT(pixels[0] == background && pixels[9] == background);
+}
+
+static void test_text_console_wraps_and_scrolls(void)
+{
+    const ios_u32 foreground = UINT32_C(0x00ffffff);
+    const ios_u32 background = UINT32_C(0x00000000);
+    ios_u8 font_data[TEST_FONT_SIZE];
+    ios_u32 pixels[CONSOLE_STRIDE * CONSOLE_HEIGHT];
+    struct ios_graphics_surface surface = {
+        pixels, CONSOLE_WIDTH, CONSOLE_HEIGHT, CONSOLE_STRIDE
+    };
+    struct ios_psf2_font font;
+    struct ios_graphics_text_console console;
+
+    make_test_font(font_data);
+    IOS_TEST_ASSERT_STATUS(ios_psf2_open(font_data, sizeof(font_data), &font), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_graphics_text_console_initialize(
+            &console, surface, &font, foreground, background
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_graphics_text_console_write(&console, "A\nB\nC"), IOS_OK
+    );
+    IOS_TEST_ASSERT(pixels[0] == background && pixels[1] == foreground);
+    IOS_TEST_ASSERT(pixels[CONSOLE_STRIDE * IOS_PSF2_FONT_HEIGHT] == background);
+    IOS_TEST_ASSERT(
+        pixels[CONSOLE_STRIDE * IOS_PSF2_FONT_HEIGHT + 2] == foreground
+    );
+    IOS_TEST_ASSERT(console.cursor_column == 1 && console.cursor_row == 1);
 }
 
 static void test_gop_open_validates_contract_and_preserves_stride(void)
@@ -126,10 +220,60 @@ static void test_psf2_validation_and_text_rendering(void)
     );
 }
 
+static void test_alpha4_validation_and_blended_rendering(void)
+{
+    const ios_u32 foreground = UINT32_C(0x00f0c080);
+    const ios_u32 background = UINT32_C(0x00102040);
+    ios_u8 font_data[TEST_ALPHA4_FONT_SIZE];
+    ios_u32 pixels[IOS_ALPHA4_FONT_WIDTH * IOS_ALPHA4_FONT_HEIGHT];
+    struct ios_graphics_surface surface = {
+        pixels, IOS_ALPHA4_FONT_WIDTH, IOS_ALPHA4_FONT_HEIGHT,
+        IOS_ALPHA4_FONT_WIDTH
+    };
+    struct ios_psf2_font font;
+
+    make_test_alpha4_font(font_data);
+    IOS_TEST_ASSERT_STATUS(
+        ios_alpha4_open(font_data, sizeof(font_data), &font), IOS_OK
+    );
+    IOS_TEST_ASSERT(font.format == IOS_RASTER_FONT_ALPHA4);
+    IOS_TEST_ASSERT(
+        font.width == IOS_ALPHA4_FONT_WIDTH && font.height == IOS_ALPHA4_FONT_HEIGHT
+    );
+    memset(pixels, 0, sizeof(pixels));
+    IOS_TEST_ASSERT_STATUS(
+        ios_graphics_draw_glyph(
+            &surface, &font, 'A', 0, 0, foreground, background, true
+        ),
+        IOS_OK
+    );
+    IOS_TEST_ASSERT(pixels[0] == foreground);
+    IOS_TEST_ASSERT(pixels[1] == UINT32_C(0x00877562));
+    IOS_TEST_ASSERT(pixels[2] == background);
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_alpha4_open(font_data, sizeof(font_data) - 1, &font),
+        IOS_ERROR(IOS_E_CORRUPT)
+    );
+    write_u32_le(font_data + 4, 1);
+    IOS_TEST_ASSERT_STATUS(
+        ios_alpha4_open(font_data, sizeof(font_data), &font),
+        IOS_ERROR(IOS_E_UNSUPPORTED_VERSION)
+    );
+    write_u32_le(font_data, 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_alpha4_open(font_data, sizeof(font_data), &font),
+        IOS_ERROR(IOS_E_CORRUPT)
+    );
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_gop_open_validates_contract_and_preserves_stride),
     IOS_TEST_CASE(test_primitives_clip_and_do_not_write_stride_padding),
-    IOS_TEST_CASE(test_psf2_validation_and_text_rendering)
+    IOS_TEST_CASE(test_psf2_validation_and_text_rendering),
+    IOS_TEST_CASE(test_alpha4_validation_and_blended_rendering),
+    IOS_TEST_CASE(test_text_console_renders_erases_and_clears),
+    IOS_TEST_CASE(test_text_console_wraps_and_scrolls)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

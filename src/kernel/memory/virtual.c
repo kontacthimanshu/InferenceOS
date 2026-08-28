@@ -14,6 +14,8 @@ enum {
 #define PTE_GLOBAL UINT64_C(0x100)
 #define PTE_OWNED UINT64_C(0x200)
 #define PTE_ADDRESS_MASK UINT64_C(0x000ffffffffff000)
+#define PTE_2M_ADDRESS_MASK UINT64_C(0x000fffffffe00000)
+#define PTE_1G_ADDRESS_MASK UINT64_C(0x000fffffc0000000)
 #define PTE_NO_EXECUTE (UINT64_C(1) << 63)
 #define USER_VIRTUAL_START UINT64_C(0x0000010000000000)
 #define USER_VIRTUAL_END UINT64_C(0x0000800000000000)
@@ -202,6 +204,9 @@ static ios_status map_one(
         entry_flags |= PTE_NO_EXECUTE;
     }
     *leaf = physical_address | entry_flags;
+    if (address_space->root_address == x86_64_paging_root()) {
+        x86_64_paging_invalidate(virtual_address);
+    }
     return IOS_OK;
 }
 
@@ -354,7 +359,9 @@ ios_status virtual_address_space_create(struct ios_address_space *address_space)
     memset(root, 0, IOS_PAGE_SIZE);
     current_root = (const ios_u64 *)kernel_root_address;
 
-    *root = *current_root;
+    for (ios_u16 index = 0; index < 2; ++index) {
+        root[index] = current_root[index];
+    }
     for (ios_u16 index = 256; index < PAGE_TABLE_ENTRY_COUNT; ++index) {
         root[index] = current_root[index];
     }
@@ -486,18 +493,48 @@ ios_status virtual_translate(
     ios_uptr *physical_address
 )
 {
-    ios_u64 *leaf;
-    ios_status status;
+    const ios_u64 *pml4;
+    ios_u64 pml4e;
+    const ios_u64 *pdpt;
+    ios_u64 pdpte;
+    const ios_u64 *pd;
+    ios_u64 pde;
+    const ios_u64 *pt;
+    ios_u64 pte;
 
     if (address_space == NULL || physical_address == NULL || address_space->root_address == 0
         || !virtual_address_is_canonical(virtual_address)) {
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     }
-    status = locate_leaf(address_space, virtual_address, &leaf);
-    if (IOS_FAILED(status) || (*leaf & PTE_PRESENT) == 0) {
+
+    pml4 = (const ios_u64 *)address_space->root_address;
+    pml4e = pml4[pml4_index(virtual_address)];
+    if ((pml4e & PTE_PRESENT) == 0 || (pml4e & PTE_LARGE) != 0) {
         return IOS_ERROR(IOS_E_NOT_FOUND);
     }
-    *physical_address = (ios_uptr)(*leaf & PTE_ADDRESS_MASK)
+
+    pdpt = table_from_entry(pml4e);
+    pdpte = pdpt[pdpt_index(virtual_address)];
+    if ((pdpte & PTE_PRESENT) == 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    if ((pdpte & PTE_LARGE) != 0) {
+        *physical_address = (ios_uptr)(pdpte & PTE_1G_ADDRESS_MASK)
+            + (virtual_address & ((UINT64_C(1) << 30U) - 1U));
+        return IOS_OK;
+    }
+
+    pd = table_from_entry(pdpte);
+    pde = pd[pd_index(virtual_address)];
+    if ((pde & PTE_PRESENT) == 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    if ((pde & PTE_LARGE) != 0) {
+        *physical_address = (ios_uptr)(pde & PTE_2M_ADDRESS_MASK)
+            + (virtual_address & ((UINT64_C(1) << 21U) - 1U));
+        return IOS_OK;
+    }
+
+    pt = table_from_entry(pde);
+    pte = pt[pt_index(virtual_address)];
+    if ((pte & PTE_PRESENT) == 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    *physical_address = (ios_uptr)(pte & PTE_ADDRESS_MASK)
         + (virtual_address & (IOS_PAGE_SIZE - 1U));
     return IOS_OK;
 }

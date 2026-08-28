@@ -4,6 +4,7 @@
 #include <inferenceos/block.h>
 #include <inferenceos/cui.h>
 #include <inferenceos/display_safe_entry.h>
+#include <inferenceos/extension_search.h>
 #include <inferenceos/fs/mount.h>
 #include <inferenceos/fs_diagnostic.h>
 #include <inferenceos/power.h>
@@ -47,6 +48,11 @@ struct ios_cui_diagnostic_binding {
     void *resolver_context;
 };
 
+struct ios_cui_extension_search_binding {
+    struct ios_extension_search_service *service;
+    const struct ios_process *caller;
+};
+
 struct ios_cui_fs_context {
     struct ios_block_device *devices[IOS_CUI_MAX_BLOCK_DEVICES];
     ios_size device_count;
@@ -61,6 +67,7 @@ struct ios_cui_fs_context {
     ios_status (*sync)(void *context);
     struct ios_power_controller *power;
     struct ios_cui_diagnostic_binding diagnostic;
+    struct ios_cui_extension_search_binding extension_search;
     void *mount_ready_context;
     ios_status (*mount_ready)(void *context, struct ios_fs_mount *mount);
 };
@@ -103,6 +110,11 @@ ios_status ios_cui_fs_set_diagnostic_service(
     ios_handle authority,
     ios_cui_diagnostic_object_resolver resolve_object,
     void *resolver_context
+);
+ios_status ios_cui_fs_set_extension_search_service(
+    struct ios_cui_fs_context *context,
+    struct ios_extension_search_service *service,
+    const struct ios_process *caller
 );
 ios_status ios_cui_register_fs_commands(struct ios_cui_command_registry *registry);
 ios_status ios_cui_register_file_commands(struct ios_cui_command_registry *registry);

@@ -49,7 +49,67 @@ ios_status ios_psf2_open(
     font->bytes_per_glyph = bytes_per_glyph;
     font->width = width;
     font->height = height;
+    font->format = IOS_RASTER_FONT_MONO1;
     return IOS_OK;
+}
+
+ios_status ios_alpha4_open(
+    const void *font_data, ios_size font_size, struct ios_psf2_font *font
+)
+{
+    const ios_u8 *bytes = font_data;
+    ios_u32 header_size;
+    ios_u32 glyph_count;
+    ios_u32 bytes_per_glyph;
+    ios_size glyph_bytes;
+
+    if (font_data == NULL || font == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    *font = (struct ios_psf2_font){ 0 };
+    if (font_size < IOS_ALPHA4_HEADER_SIZE) return IOS_ERROR(IOS_E_CORRUPT);
+    if (read_u32_le(bytes) != IOS_ALPHA4_MAGIC) return IOS_ERROR(IOS_E_CORRUPT);
+    if (read_u32_le(bytes + 4) != 0) return IOS_ERROR(IOS_E_UNSUPPORTED_VERSION);
+    header_size = read_u32_le(bytes + 8);
+    glyph_count = read_u32_le(bytes + 16);
+    bytes_per_glyph = read_u32_le(bytes + 20);
+    if (header_size != IOS_ALPHA4_HEADER_SIZE || read_u32_le(bytes + 12) != 0
+        || read_u32_le(bytes + 24) != IOS_ALPHA4_FONT_HEIGHT
+        || read_u32_le(bytes + 28) != IOS_ALPHA4_FONT_WIDTH) {
+        return IOS_ERROR(IOS_E_CORRUPT);
+    }
+    if (glyph_count < 128
+        || bytes_per_glyph != IOS_ALPHA4_FONT_WIDTH * IOS_ALPHA4_FONT_HEIGHT / 2) {
+        return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    }
+    if (glyph_count > SIZE_MAX / bytes_per_glyph) return IOS_ERROR(IOS_E_OVERFLOW);
+    glyph_bytes = (ios_size)glyph_count * bytes_per_glyph;
+    if (glyph_bytes != font_size - header_size) return IOS_ERROR(IOS_E_CORRUPT);
+
+    font->glyphs = bytes + header_size;
+    font->glyph_data_size = glyph_bytes;
+    font->glyph_count = glyph_count;
+    font->bytes_per_glyph = bytes_per_glyph;
+    font->width = IOS_ALPHA4_FONT_WIDTH;
+    font->height = IOS_ALPHA4_FONT_HEIGHT;
+    font->format = IOS_RASTER_FONT_ALPHA4;
+    return IOS_OK;
+}
+
+static ios_u32 blend_channel(ios_u32 foreground, ios_u32 background, ios_u32 coverage)
+{
+    return (foreground * coverage + background * (15U - coverage) + 7U) / 15U;
+}
+
+static ios_u32 blend_color(ios_u32 foreground, ios_u32 background, ios_u32 coverage)
+{
+    return blend_channel(foreground & UINT32_C(0xff), background & UINT32_C(0xff), coverage)
+        | (blend_channel(
+            (foreground >> 8) & UINT32_C(0xff),
+            (background >> 8) & UINT32_C(0xff), coverage
+        ) << 8)
+        | (blend_channel(
+            (foreground >> 16) & UINT32_C(0xff),
+            (background >> 16) & UINT32_C(0xff), coverage
+        ) << 16);
 }
 
 ios_status ios_graphics_draw_glyph(
@@ -69,6 +129,31 @@ ios_status ios_graphics_draw_glyph(
     }
     if (codepoint >= font->glyph_count) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
     glyph = font->glyphs + (ios_size)codepoint * font->bytes_per_glyph;
+    if (font->format == IOS_RASTER_FONT_ALPHA4) {
+        for (ios_u32 row = 0; row < font->height; ++row) {
+            for (ios_u32 column = 0; column < font->width; ++column) {
+                const ios_u8 packed = glyph[(row * font->width + column) / 2U];
+                const ios_u32 coverage = (column & 1U) == 0
+                    ? packed >> 4 : packed & UINT8_C(0x0f);
+                ios_u32 base = background;
+                const ios_i32 pixel_x = x + (ios_i32)column;
+                const ios_i32 pixel_y = y + (ios_i32)row;
+                if (coverage == 0 && !opaque_background) continue;
+                if (!opaque_background && pixel_x >= 0 && pixel_y >= 0
+                    && pixel_x < (ios_i32)surface->width
+                    && pixel_y < (ios_i32)surface->height) {
+                    base = surface->pixels[(ios_size)pixel_y * surface->stride
+                        + (ios_size)pixel_x];
+                }
+                ios_graphics_put_pixel(
+                    surface, pixel_x, pixel_y,
+                    blend_color(foreground, base, coverage)
+                );
+            }
+        }
+        return IOS_OK;
+    }
+    if (font->format != IOS_RASTER_FONT_MONO1) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
     for (ios_u32 row = 0; row < font->height; ++row) {
         const ios_u8 bits = glyph[row];
         for (ios_u32 column = 0; column < font->width; ++column) {

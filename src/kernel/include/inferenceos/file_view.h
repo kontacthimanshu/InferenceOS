@@ -8,12 +8,14 @@
 struct ios_file_view_service {
     struct ios_vfs_mount_registry *mount_registry;
     const struct ios_type_catalog *type_catalog;
+    ios_type_icon_capability generic_file_capability;
 };
 
 ios_status ios_file_view_service_initialize(
     struct ios_file_view_service *service,
     struct ios_vfs_mount_registry *mount_registry,
-    const struct ios_type_catalog *type_catalog
+    const struct ios_type_catalog *type_catalog,
+    ios_type_icon_capability generic_file_capability
 );
 
 ios_status ios_file_view_dispatch(

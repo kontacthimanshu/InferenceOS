@@ -15,11 +15,20 @@ not production-ready, hardened, or a substitute for a general-purpose operating 
 Other firmware, physical hardware, accelerators, CPU counts, graphics/input devices, storage
 controllers, and host QEMU versions are not release-qualified merely because they happen to boot.
 
+An experimental Hyper-V Generation 2 backend is also present. It includes Hyper-V/VMBus,
+StorVSC, synthetic keyboard/SynthHID pointer input, retained UEFI GOP, runtime ResetSystem,
+fail-closed boot-disk exclusion, and a complete CUI filesystem-command provider. The real-host
+cold-boot/CUI and low-level StorVSC durability matrices pass, while file-level persistence,
+attachment-order, input/display, and power qualification still need retained Hyper-V evidence; see
+[hyperv.md](hyperv.md).
+
 ## Filesystem limitations
 
 - InferenceOS-FS is a distinct filesystem. It is not FAT32-compatible even though it derives its
   allocation and primary directory-record model from FAT32.
 - Maximum file size is 4 GiB minus one byte. Sparse guest files are not supported in version 1.
+- The current CUI file service bounds each file operation to 256 clusters (1 MiB); the on-disk
+  format's larger theoretical file-size field is not yet exposed through this console backend.
 - Version 1 has no journal, snapshots, encryption, compression, or automatic repair.
 - Corruption can result in diagnostic read-only access or a rejected mount. The system does not
   silently repair unsafe metadata or promise recovery of damaged data.
@@ -27,6 +36,8 @@ controllers, and host QEMU versions are not release-qualified merely because the
   cryptographic security mechanism. Hash collisions never establish file identity.
 - The reference persistent image is host-sparse. Tools that do not preserve sparse ranges can
   expand it to its full logical size.
+- Hyper-V data VHDXs must remain unpartitioned on the Windows host. InferenceOS-FS is created by the
+  guest on the whole synthetic SCSI disk; Windows FAT/NTFS formatting is neither required nor valid.
 
 ## Extension hiding is not secrecy
 
@@ -74,10 +85,10 @@ recipes, and documented GCC/Clang validation profiles. Image manifests contain n
 absolute source paths. QEMU evidence manifests intentionally contain run times and host artifact
 paths because they record a particular validation run.
 
-The present CMake cross-build compiles the production libraries and UEFI loader but does not yet
-link the final kernel or static Shell/GUI application executables. The ESP packaging target therefore
-requires explicitly supplied kernel and system-module inputs, as described in `build.md`. Until
-those final link targets are integrated, the repository does not claim that an external evaluator
-can produce the complete bootable image solely from a clean checkout.
+The documented clean-checkout workflow now links the kernel and static system applications,
+packages the complete ESP, creates the sparse persistent disk, and boots the pinned QEMU reference
+profile. T123 also completed the post-convergence dual-compiler, hosted, integration, fault, and
+QEMU matrix and archived its consolidated evidence under `build/validation/`. Qualification applies
+only to the exact reference boundary and demonstrator claims documented here.
 
 See [build.md](build.md) for the qualified build, launch, and validation workflow.

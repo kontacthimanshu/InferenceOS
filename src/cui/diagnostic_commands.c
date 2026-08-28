@@ -209,9 +209,9 @@ static ios_status fatinfo_command(
 }
 
 static const struct ios_cui_command descriptors[] = {
-    { "fileinfo", "show privileged internal file metadata", fileinfo_command },
-    { "hashinfo", "show privileged extension-hash validation", hashinfo_command },
-    { "fatinfo", "show a bounded validated cluster chain", fatinfo_command }
+    { "fileinfo", "show privileged internal file metadata", "fileinfo <path>", fileinfo_command },
+    { "hashinfo", "show privileged extension-hash validation", "hashinfo <path>", hashinfo_command },
+    { "fatinfo", "show a bounded validated cluster chain", "fatinfo <path>", fatinfo_command }
 };
 
 ios_status ios_cui_fs_set_diagnostic_service(

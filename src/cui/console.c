@@ -1,5 +1,7 @@
 #include <inferenceos/cui.h>
 
+#include <inferenceos/runtime.h>
+
 static void write_error(
     struct ios_cui_console *console, const char *symbol, const char *message
 )
@@ -8,6 +10,73 @@ static void write_error(
     console->io.write(symbol, console->io.write_context);
     console->io.write(": ", console->io.write_context);
     console->io.write(message, console->io.write_context);
+    console->io.write("\n", console->io.write_context);
+}
+
+static const char *status_symbol(ios_status status)
+{
+    switch (status) {
+    case IOS_ERROR(IOS_E_INVALID_ARGUMENT): return "invalid_arguments";
+    case IOS_ERROR(IOS_E_OUT_OF_RANGE): return "out_of_range";
+    case IOS_ERROR(IOS_E_OVERFLOW): return "overflow";
+    case IOS_ERROR(IOS_E_NOT_SUPPORTED): return "not_supported";
+    case IOS_ERROR(IOS_E_NOT_FOUND): return "not_found";
+    case IOS_ERROR(IOS_E_ALREADY_EXISTS): return "already_exists";
+    case IOS_ERROR(IOS_E_NO_MEMORY): return "no_memory";
+    case IOS_ERROR(IOS_E_NO_SPACE): return "no_space";
+    case IOS_ERROR(IOS_E_ACCESS_DENIED): return "access_denied";
+    case IOS_ERROR(IOS_E_BUSY): return "busy";
+    case IOS_ERROR(IOS_E_WOULD_BLOCK): return "would_block";
+    case IOS_ERROR(IOS_E_TIMEOUT): return "timeout";
+    case IOS_ERROR(IOS_E_IO): return "io_error";
+    case IOS_ERROR(IOS_E_CORRUPT): return "corrupt";
+    case IOS_ERROR(IOS_E_READ_ONLY): return "read_only";
+    case IOS_ERROR(IOS_E_NOT_EMPTY): return "not_empty";
+    case IOS_ERROR(IOS_E_PROTOCOL): return "protocol_error";
+    case IOS_ERROR(IOS_E_INVALID_STATE): return "invalid_state";
+    default: return "command_failed";
+    }
+}
+
+static const char *status_message(ios_status status)
+{
+    switch (status) {
+    case IOS_ERROR(IOS_E_INVALID_ARGUMENT): return "check command syntax with help";
+    case IOS_ERROR(IOS_E_NOT_SUPPORTED): return "operation is not supported";
+    case IOS_ERROR(IOS_E_NOT_FOUND): return "path or object was not found";
+    case IOS_ERROR(IOS_E_ALREADY_EXISTS): return "path or object already exists";
+    case IOS_ERROR(IOS_E_NO_SPACE): return "filesystem or command capacity is full";
+    case IOS_ERROR(IOS_E_ACCESS_DENIED): return "operation is not authorized";
+    case IOS_ERROR(IOS_E_BUSY): return "object is currently in use";
+    case IOS_ERROR(IOS_E_IO): return "storage operation failed";
+    case IOS_ERROR(IOS_E_CORRUPT): return "filesystem metadata is invalid";
+    case IOS_ERROR(IOS_E_READ_ONLY): return "filesystem is read-only";
+    case IOS_ERROR(IOS_E_NOT_EMPTY): return "directory is not empty";
+    case IOS_ERROR(IOS_E_INVALID_STATE): return "required service or mount is unavailable";
+    default: return "command rejected";
+    }
+}
+
+static const struct ios_cui_command *find_command(
+    const struct ios_cui_command_registry *registry, const char *name
+)
+{
+    if (registry == NULL || name == NULL) return NULL;
+    for (ios_size index = 0; index < registry->command_count; ++index) {
+        if (strcmp(registry->commands[index]->name, name) == 0) {
+            return registry->commands[index];
+        }
+    }
+    return NULL;
+}
+
+static void write_usage(
+    struct ios_cui_console *console, const struct ios_cui_command *command
+)
+{
+    if (command == NULL || command->usage == NULL) return;
+    console->io.write("usage: ", console->io.write_context);
+    console->io.write(command->usage, console->io.write_context);
     console->io.write("\n", console->io.write_context);
 }
 
@@ -44,9 +113,17 @@ static ios_status execute_line(struct ios_cui_console *console)
     }
     status = ios_cui_command_dispatch(console->registry, &parsed, &console->io);
     if (status == IOS_ERROR(IOS_E_NOT_FOUND)) {
-        write_error(console, "command_not_found", "unknown command");
+        const bool known = find_command(console->registry, parsed.arguments[0]) != NULL;
+        write_error(
+            console,
+            known ? status_symbol(status) : "command_not_found",
+            known ? status_message(status) : "unknown command"
+        );
     } else if (IOS_FAILED(status)) {
-        write_error(console, "command_failed", "command rejected");
+        write_error(console, status_symbol(status), status_message(status));
+        if (status == IOS_ERROR(IOS_E_INVALID_ARGUMENT)) {
+            write_usage(console, find_command(console->registry, parsed.arguments[0]));
+        }
     }
     return status;
 }

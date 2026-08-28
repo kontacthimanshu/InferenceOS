@@ -12,6 +12,7 @@ function(inferenceos_add_host_test target)
             "${PROJECT_SOURCE_DIR}/src/boot/uefi"
             "${PROJECT_SOURCE_DIR}/src/drivers/ps2/include"
             "${PROJECT_SOURCE_DIR}/src/drivers/framebuffer/include"
+            "${PROJECT_SOURCE_DIR}/src/drivers/hyperv/include"
             "${PROJECT_SOURCE_DIR}/src/gui/input/include"
             "${PROJECT_SOURCE_DIR}/src/gui/graphics/include"
             "${PROJECT_SOURCE_DIR}/src/gui/window/include"
@@ -36,6 +37,67 @@ function(inferenceos_add_host_test target)
         PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS NO
     )
 endfunction()
+
+inferenceos_add_host_test(
+    inferenceos_hyperv_protocol_test
+    unit/hyperv_protocol_test.c
+    "${PROJECT_SOURCE_DIR}/src/drivers/hyperv/protocol.c"
+)
+add_test(NAME hyperv-protocol-unit COMMAND inferenceos_hyperv_protocol_test)
+set_tests_properties(hyperv-protocol-unit PROPERTIES LABELS "host;unit;hyperv;protocol")
+
+inferenceos_add_host_test(
+    inferenceos_hyperv_ring_test
+    unit/hyperv_ring_test.c
+    "${PROJECT_SOURCE_DIR}/src/drivers/hyperv/ring.c"
+    "${PROJECT_SOURCE_DIR}/src/arch/x86_64/io.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+)
+add_test(NAME hyperv-ring-unit COMMAND inferenceos_hyperv_ring_test)
+set_tests_properties(hyperv-ring-unit PROPERTIES LABELS "host;unit;hyperv;vmbus;ring")
+
+inferenceos_add_host_test(
+    inferenceos_storvsc_codec_test
+    unit/storvsc_codec_test.c
+    "${PROJECT_SOURCE_DIR}/src/drivers/hyperv/storvsc.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+)
+target_include_directories(
+    inferenceos_storvsc_codec_test PRIVATE "${PROJECT_SOURCE_DIR}/src/block/include"
+)
+# The codec test does not exercise transport. Supplying tiny link stubs keeps it
+# focused on SCSI serialization while the integration profile covers VMBus I/O.
+target_sources(inferenceos_storvsc_codec_test PRIVATE unit/storvsc_transport_stubs.c)
+add_test(NAME storvsc-codec-unit COMMAND inferenceos_storvsc_codec_test)
+set_tests_properties(storvsc-codec-unit PROPERTIES LABELS "host;unit;hyperv;storvsc;scsi")
+
+inferenceos_add_host_test(
+    inferenceos_block_disk_safety_test
+    unit/block_disk_safety_test.c
+    "${PROJECT_SOURCE_DIR}/src/block/device.c"
+    "${PROJECT_SOURCE_DIR}/src/block/disk_safety.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+)
+target_include_directories(
+    inferenceos_block_disk_safety_test PRIVATE "${PROJECT_SOURCE_DIR}/src/block/include"
+)
+add_test(NAME block-disk-safety-unit COMMAND inferenceos_block_disk_safety_test)
+set_tests_properties(
+    block-disk-safety-unit PROPERTIES LABELS "host;unit;hyperv;storage;safety"
+)
+
+inferenceos_add_host_test(
+    inferenceos_hyperv_input_test
+    unit/hyperv_input_test.c
+    unit/hyperv_input_stubs.c
+    "${PROJECT_SOURCE_DIR}/src/drivers/hyperv/input.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/input/events.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+)
+add_test(NAME hyperv-input-unit COMMAND inferenceos_hyperv_input_test)
+set_tests_properties(
+    hyperv-input-unit PROPERTIES LABELS "host;unit;hyperv;input;keyboard;mouse"
+)
 
 inferenceos_add_host_test(
     inferenceos_user_runtime_test
@@ -151,6 +213,7 @@ target_include_directories(
     inferenceos_fs_geometry_test PRIVATE
         "${PROJECT_SOURCE_DIR}/src/block/include"
         "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
 )
 add_test(NAME fs-geometry-unit COMMAND inferenceos_fs_geometry_test)
 set_tests_properties(fs-geometry-unit PROPERTIES LABELS "host;unit;filesystem;geometry")
@@ -202,6 +265,28 @@ target_include_directories(
 add_test(NAME directory-record-unit COMMAND inferenceos_directory_record_test)
 set_tests_properties(
     directory-record-unit PROPERTIES LABELS "host;unit;filesystem;metadata;codec;collision"
+)
+
+inferenceos_add_host_test(
+    inferenceos_extension_search_service_test
+    contract/extension_search_service_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/extension_search.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/directory.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
+)
+target_include_directories(
+    inferenceos_extension_search_service_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/block/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+add_test(
+    NAME extension-search-service-contract
+    COMMAND inferenceos_extension_search_service_test
+)
+set_tests_properties(
+    extension-search-service-contract
+    PROPERTIES LABELS "host;contract;kernel;syscall;vfs;bounds;metadata-hiding"
 )
 
 set(_inferenceos_extension_registry_test_sources
@@ -292,6 +377,38 @@ set_tests_properties(
 )
 
 inferenceos_add_host_test(
+    inferenceos_file_service_test
+    integration/file_service_test.c
+    "${PROJECT_SOURCE_DIR}/src/block/device.c"
+    "${PROJECT_SOURCE_DIR}/src/block/cache.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/file_service.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/transaction.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/registry.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/registry_record.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/directory.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/fat.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/records.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/hash.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"
+    "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/sync.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/directory.c"
+)
+target_include_directories(
+    inferenceos_file_service_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/block/include"
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+target_link_libraries(inferenceos_file_service_test PRIVATE InferenceOS::TestSupport)
+add_test(NAME file-service-integration COMMAND inferenceos_file_service_test)
+set_tests_properties(
+    file-service-integration
+    PROPERTIES LABELS "host;integration;filesystem;file;cui;durability"
+)
+
+inferenceos_add_host_test(
     inferenceos_file_commit_fault_test
     fault/file_commit_fault_test.c
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/transaction.c"
@@ -347,6 +464,7 @@ inferenceos_add_host_test(
     "${PROJECT_SOURCE_DIR}/src/drivers/framebuffer/gop.c"
     "${PROJECT_SOURCE_DIR}/src/gui/graphics/primitives.c"
     "${PROJECT_SOURCE_DIR}/src/gui/graphics/text.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/text_console.c"
 )
 add_test(NAME graphics-unit COMMAND inferenceos_graphics_test)
 set_tests_properties(graphics-unit PROPERTIES LABELS "host;unit;graphics;gui")
@@ -402,6 +520,7 @@ inferenceos_add_host_test(
     "${PROJECT_SOURCE_DIR}/src/gui/window/compositor.c"
     "${PROJECT_SOURCE_DIR}/src/gui/graphics/primitives.c"
     "${PROJECT_SOURCE_DIR}/src/gui/graphics/text.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/text_console.c"
     "${PROJECT_SOURCE_DIR}/src/drivers/framebuffer/gop.c"
     "${PROJECT_SOURCE_DIR}/src/cui/parser.c"
     "${PROJECT_SOURCE_DIR}/src/cui/commands.c"
@@ -1005,11 +1124,15 @@ target_sources(
         "${PROJECT_SOURCE_DIR}/src/cui/file_commands.c"
         "${PROJECT_SOURCE_DIR}/src/cui/directory_commands.c"
         "${PROJECT_SOURCE_DIR}/src/cui/diagnostic_commands.c"
+        "${PROJECT_SOURCE_DIR}/src/kernel/syscall/extension_search.c"
         "${PROJECT_SOURCE_DIR}/src/kernel/syscall/fs_diagnostic.c"
         "${PROJECT_SOURCE_DIR}/src/kernel/process/handle_table.c"
         "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
         "${PROJECT_SOURCE_DIR}/src/block/device.c"
+        "${PROJECT_SOURCE_DIR}/src/block/disk_safety.c"
         "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
+        "${PROJECT_SOURCE_DIR}/src/vfs/directory.c"
+        "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
         "${PROJECT_SOURCE_DIR}/src/vfs/unmount.c"
         "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/superblock.c"
         "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/crc32.c"

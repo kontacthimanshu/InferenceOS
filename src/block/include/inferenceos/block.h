@@ -50,6 +50,24 @@ enum ios_block_device_status block_device_get_status(const struct ios_block_devi
 
 /* Platform discovery stays behind the generic block boundary. */
 ios_status block_platform_initialize_primary(struct ios_block_device *device);
+const char *block_platform_last_stage(void);
+void block_platform_set_boot_partition_guid(const ios_u8 guid[16]);
+bool block_platform_is_hyperv(void);
+
+enum ios_block_disk_classification {
+    IOS_BLOCK_DISK_ELIGIBLE_BLANK,
+    IOS_BLOCK_DISK_ELIGIBLE_INFERENCE_FS,
+    IOS_BLOCK_DISK_PROTECTED_BOOT,
+    IOS_BLOCK_DISK_PROTECTED_PARTITIONED,
+    IOS_BLOCK_DISK_PROTECTED_FOREIGN,
+    IOS_BLOCK_DISK_REJECTED_IO
+};
+
+ios_status block_classify_data_disk(
+    struct ios_block_device *device,
+    const ios_u8 boot_partition_guid[16],
+    enum ios_block_disk_classification *classification
+);
 
 enum ios_block_cache_state {
     IOS_BLOCK_CACHE_EMPTY,

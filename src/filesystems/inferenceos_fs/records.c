@@ -113,6 +113,37 @@ ios_status ios_fs_name_extension(
     return IOS_OK;
 }
 
+ios_status ios_fs_extension_query_canonicalize(
+    const char *input,
+    ios_size input_length,
+    ios_u8 output[IOS_FS_EXTENSION_SIZE],
+    ios_size *output_length
+)
+{
+    ios_size cursor = 0;
+    ios_size count = 0;
+    if (input == NULL || output == NULL || output_length == NULL
+        || input_length == 0 || input_length > IOS_FS_EXTENSION_SIZE + 1U) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    memset(output, 0, IOS_FS_EXTENSION_SIZE);
+    *output_length = 0;
+    if (*input == '.') {
+        cursor = 1;
+        if (cursor == input_length) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    while (cursor < input_length) {
+        ios_u8 value = (ios_u8)input[cursor++];
+        if (value >= 'a' && value <= 'z') value = (ios_u8)(value - ('a' - 'A'));
+        if (!supported_name_byte(value) || count == IOS_FS_EXTENSION_SIZE) {
+            return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+        }
+        output[count++] = value;
+    }
+    *output_length = count;
+    return count == 0 ? IOS_ERROR(IOS_E_INVALID_ARGUMENT) : IOS_OK;
+}
+
 ios_u8 ios_fs_primary_name_checksum(const ios_u8 name[IOS_FS_NAME_SIZE])
 {
     ios_u8 checksum = 0;

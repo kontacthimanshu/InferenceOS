@@ -58,7 +58,8 @@ static struct ios_boot_info valid_boot_info(void)
         .module_descriptor_count = 2,
         .module_descriptor_size = sizeof(*modules),
         .esp_device_handle = 1,
-        .root_system_description_pointer = (ios_uptr)root_system_description_pointer
+        .root_system_description_pointer = (ios_uptr)root_system_description_pointer,
+        .runtime_services = (ios_uptr)root_system_description_pointer
     };
 
     memset(modules, 0, sizeof(modules));

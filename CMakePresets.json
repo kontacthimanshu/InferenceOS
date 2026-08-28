@@ -29,6 +29,26 @@
       "toolchainFile": "${sourceDir}/cmake/toolchains/x86_64-none-elf-clang.cmake"
     },
     {
+      "name": "gcc-host-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_ASM_COMPILER": "gcc",
+        "INFERENCEOS_BUILD_HOST_TESTS": true
+      }
+    },
+    {
+      "name": "clang-host-base",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_ASM_COMPILER": "clang",
+        "INFERENCEOS_BUILD_HOST_TESTS": true
+      }
+    },
+    {
       "name": "gcc-debug",
       "displayName": "GCC cross-toolchain (Debug)",
       "inherits": "gcc-base",
@@ -59,6 +79,22 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "gcc-host-debug",
+      "displayName": "Native GCC hosted tests (Debug)",
+      "inherits": "gcc-host-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "clang-host-debug",
+      "displayName": "Native Clang hosted tests (Debug)",
+      "inherits": "clang-host-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
@@ -77,6 +113,14 @@
     {
       "name": "clang-release",
       "configurePreset": "clang-release"
+    },
+    {
+      "name": "gcc-host-debug",
+      "configurePreset": "gcc-host-debug"
+    },
+    {
+      "name": "clang-host-debug",
+      "configurePreset": "clang-host-debug"
     }
   ],
   "testPresets": [
@@ -88,33 +132,34 @@
       },
       "execution": {
         "stopOnFailure": false,
-        "timeout": 120
+        "timeout": 120,
+        "noTestsAction": "error"
       }
     },
     {
       "name": "gcc-host",
       "inherits": "test-base",
-      "configurePreset": "gcc-debug",
+      "configurePreset": "gcc-host-debug",
       "filter": {
         "include": {
-          "label": "^(host|unit|property)$"
+          "label": "^(unit|property)$"
         }
       }
     },
     {
       "name": "clang-host",
       "inherits": "test-base",
-      "configurePreset": "clang-debug",
+      "configurePreset": "clang-host-debug",
       "filter": {
         "include": {
-          "label": "^(host|unit|property)$"
+          "label": "^(unit|property)$"
         }
       }
     },
     {
       "name": "gcc-integration",
       "inherits": "test-base",
-      "configurePreset": "gcc-debug",
+      "configurePreset": "gcc-host-debug",
       "filter": {
         "include": {
           "label": "^integration$"
@@ -124,7 +169,7 @@
     {
       "name": "clang-integration",
       "inherits": "test-base",
-      "configurePreset": "clang-debug",
+      "configurePreset": "clang-host-debug",
       "filter": {
         "include": {
           "label": "^integration$"
@@ -134,7 +179,7 @@
     {
       "name": "gcc-fault",
       "inherits": "test-base",
-      "configurePreset": "gcc-debug",
+      "configurePreset": "gcc-host-debug",
       "filter": {
         "include": {
           "label": "^fault$"
@@ -144,7 +189,7 @@
     {
       "name": "clang-fault",
       "inherits": "test-base",
-      "configurePreset": "clang-debug",
+      "configurePreset": "clang-host-debug",
       "filter": {
         "include": {
           "label": "^fault$"
@@ -154,7 +199,7 @@
     {
       "name": "gcc-contract",
       "inherits": "test-base",
-      "configurePreset": "gcc-debug",
+      "configurePreset": "gcc-host-debug",
       "filter": {
         "include": {
           "label": "^contract$"
@@ -164,7 +209,7 @@
     {
       "name": "clang-contract",
       "inherits": "test-base",
-      "configurePreset": "clang-debug",
+      "configurePreset": "clang-host-debug",
       "filter": {
         "include": {
           "label": "^contract$"

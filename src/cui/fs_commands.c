@@ -54,7 +54,7 @@ static ios_status parse_device(
     *index = value;
     return IOS_OK;
 }
-static void write_device_line(
+static void write_device_fields(
     struct ios_cui_io *io, ios_size index, const struct ios_block_device *device)
 {
     io->write("disk", io->write_context); write_u64(io, index);
@@ -62,7 +62,56 @@ static void write_device_line(
     io->write(" sector_size=", io->write_context); write_u64(io, device->logical_sector_size);
     io->write(" sectors=", io->write_context); write_u64(io, device->sector_count);
     io->write(" capacity_bytes=", io->write_context); write_u64(io, block_device_capacity_bytes(device));
-    io->write("\n", io->write_context);
+}
+
+static void write_device_filesystem(
+    struct ios_cui_fs_context *context, ios_size index, struct ios_cui_io *io
+)
+{
+    static const ios_u8 no_boot_partition_guid[16] = { 0 };
+    struct ios_block_device *device = context->devices[index];
+    struct ios_vfs_mount *root = context->mount_registry == NULL
+        ? NULL : vfs_root_mount(context->mount_registry);
+    enum ios_block_disk_classification classification = IOS_BLOCK_DISK_REJECTED_IO;
+    const char *filesystem = "unknown";
+    const char *filesystem_state = "probe_failed";
+    const char *current_mount_state = "unmounted";
+
+    if (root != NULL && context->filesystem_mount != NULL
+        && root == &context->filesystem_mount->vfs && root->device == device) {
+        filesystem = "InferenceOS-FS";
+        filesystem_state = "mounted";
+        current_mount_state = mount_state(root->state);
+    } else if (IOS_SUCCEEDED(block_classify_data_disk(
+        device, no_boot_partition_guid, &classification))) {
+        switch (classification) {
+        case IOS_BLOCK_DISK_ELIGIBLE_BLANK:
+            filesystem = "none";
+            filesystem_state = "blank";
+            break;
+        case IOS_BLOCK_DISK_ELIGIBLE_INFERENCE_FS:
+            filesystem = "InferenceOS-FS";
+            filesystem_state = "recognized";
+            break;
+        case IOS_BLOCK_DISK_PROTECTED_BOOT:
+            filesystem_state = "boot_protected";
+            break;
+        case IOS_BLOCK_DISK_PROTECTED_PARTITIONED:
+            filesystem_state = "partitioned";
+            break;
+        case IOS_BLOCK_DISK_PROTECTED_FOREIGN:
+            filesystem_state = "foreign";
+            break;
+        case IOS_BLOCK_DISK_REJECTED_IO:
+            break;
+        }
+    }
+    io->write(" filesystem=", io->write_context);
+    io->write(filesystem, io->write_context);
+    io->write(" filesystem_state=", io->write_context);
+    io->write(filesystem_state, io->write_context);
+    io->write(" mount_state=", io->write_context);
+    io->write(current_mount_state, io->write_context);
 }
 
 static ios_status devices_command(
@@ -72,7 +121,8 @@ static ios_status devices_command(
     (void)arguments;
     if (count != 1 || context == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     for (ios_size index = 0; index < context->device_count; ++index) {
-        write_device_line(io, index, context->devices[index]);
+        write_device_fields(io, index, context->devices[index]);
+        io->write("\n", io->write_context);
     }
     return IOS_OK;
 }
@@ -85,7 +135,9 @@ static ios_status diskinfo_command(
     if (count != 2) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     status = parse_device(context, arguments[1], &index);
     if (IOS_FAILED(status)) return status;
-    write_device_line(io, index, context->devices[index]);
+    write_device_fields(io, index, context->devices[index]);
+    write_device_filesystem(context, index, io);
+    io->write("\n", io->write_context);
     return IOS_OK;
 }
 static ios_status format_command(
@@ -97,8 +149,11 @@ static ios_status format_command(
     struct ios_fs_geometry geometry;
     ios_size index;
     ios_status status;
-    if (count != 2 || context == NULL || context->mount_registry == NULL
-        || context->mount_registry->root != NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
+    if (count != 2) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (context == NULL || context->mount_registry == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    if (context->mount_registry->root != NULL) return IOS_ERROR(IOS_E_BUSY);
     status = parse_device(context, arguments[1], &index);
     if (IOS_FAILED(status)) return status;
     if (context->next_volume_serial == UINT32_MAX) return IOS_ERROR(IOS_E_OVERFLOW);
@@ -190,10 +245,10 @@ static ios_status fsinfo_command(
     ios_status diagnostic_status = ios_cui_write_expanded_fsinfo(io);
     if (diagnostic_status != IOS_ERROR(IOS_E_NOT_SUPPORTED)) return diagnostic_status;
     root = vfs_root_mount(context->mount_registry);
-    if (root == NULL || root->driver_context != context->filesystem_mount) {
+    if (root == NULL || root != &context->filesystem_mount->vfs) {
         return IOS_ERROR(IOS_E_NOT_FOUND);
     }
-    filesystem = root->driver_context;
+    filesystem = context->filesystem_mount;
     free_bytes = filesystem->geometry.cluster_count > 0
         ? ((ios_u64)filesystem->geometry.cluster_count - 1)
             * IOS_FS_SECTORS_PER_CLUSTER * IOS_FS_SECTOR_SIZE : 0;
@@ -222,9 +277,8 @@ static ios_status sync_command(
 {
     struct ios_cui_fs_context *context = get_context(io);
     (void)arguments;
-    if (count != 1 || context == NULL || context->sync == NULL) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
+    if (count != 1) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (context == NULL || context->sync == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     return context->sync(context->sync_context);
 }
 static ios_status reboot_command(
@@ -232,9 +286,8 @@ static ios_status reboot_command(
 {
     struct ios_cui_fs_context *context = get_context(io);
     (void)arguments;
-    if (count != 1 || context == NULL || context->power == NULL) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
+    if (count != 1) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (context == NULL || context->power == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     return ios_power_request(context->power, IOS_POWER_REBOOT);
 }
 static ios_status shutdown_command(
@@ -242,22 +295,21 @@ static ios_status shutdown_command(
 {
     struct ios_cui_fs_context *context = get_context(io);
     (void)arguments;
-    if (count != 1 || context == NULL || context->power == NULL) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
+    if (count != 1) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (context == NULL || context->power == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     return ios_power_request(context->power, IOS_POWER_SHUTDOWN);
 }
 
 static const struct ios_cui_command descriptors[] = {
-    { "devices", "list block devices", devices_command },
-    { "diskinfo", "show block device information", diskinfo_command },
-    { "format", "format an InferenceOS-FS device", format_command },
-    { "mount", "mount an InferenceOS-FS device", mount_command },
-    { "unmount", "flush and unmount a filesystem", unmount_command },
-    { "fsinfo", "show mounted filesystem information", fsinfo_command },
-    { "sync", "persist filesystem and device state", sync_command },
-    { "reboot", "synchronize storage and restart", reboot_command },
-    { "shutdown", "synchronize storage and halt", shutdown_command }
+    { "devices", "list block devices", "devices", devices_command },
+    { "diskinfo", "show block device information", "diskinfo <diskN>", diskinfo_command },
+    { "format", "format an InferenceOS-FS device", "format <diskN>", format_command },
+    { "mount", "mount an InferenceOS-FS device", "mount <diskN> /", mount_command },
+    { "unmount", "flush and unmount a filesystem", "unmount /", unmount_command },
+    { "fsinfo", "show mounted filesystem information", "fsinfo", fsinfo_command },
+    { "sync", "persist filesystem and device state", "sync", sync_command },
+    { "reboot", "synchronize storage and restart", "reboot", reboot_command },
+    { "shutdown", "synchronize storage and halt", "shutdown", shutdown_command }
 };
 
 ios_status ios_cui_fs_context_initialize(
@@ -291,6 +343,19 @@ ios_status ios_cui_fs_set_file_operations(
         || operations->remove == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     context->file_context = file_context;
     context->file_operations = *operations;
+    return IOS_OK;
+}
+ios_status ios_cui_fs_set_extension_search_service(
+    struct ios_cui_fs_context *context,
+    struct ios_extension_search_service *service,
+    const struct ios_process *caller)
+{
+    if (context == NULL || service == NULL || caller == NULL
+        || caller->process_id == 0 || caller->application_identity == 0) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    context->extension_search.service = service;
+    context->extension_search.caller = caller;
     return IOS_OK;
 }
 ios_status ios_cui_fs_set_directory_operations(

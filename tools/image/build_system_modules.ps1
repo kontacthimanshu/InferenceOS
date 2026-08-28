@@ -58,14 +58,14 @@ function Assert-StaticElf64([string]$Path) {
     }
 }
 
-function Assert-Psf2Font([string]$Path) {
+function Assert-Alpha4Font([string]$Path) {
     [byte[]]$font = [System.IO.File]::ReadAllBytes($Path)
-    if ($font.Length -lt 32 -or (Read-UInt32LE $font 0) -ne 2253043058 -or
+    if ($font.Length -lt 32 -or (Read-UInt32LE $font 0) -ne 877019465 -or
         (Read-UInt32LE $font 4) -ne 0 -or (Read-UInt32LE $font 8) -ne 32 -or
-        (Read-UInt32LE $font 12) -ne 0 -or (Read-UInt32LE $font 16) -ne 256 -or
-        (Read-UInt32LE $font 20) -ne 16 -or (Read-UInt32LE $font 24) -ne 16 -or
-        (Read-UInt32LE $font 28) -ne 8 -or $font.Length -ne 4128) {
-        throw "Asset '$Path' is not the required Unicode-free 256-glyph 8x16 PSF2 font."
+        (Read-UInt32LE $font 12) -ne 0 -or (Read-UInt32LE $font 16) -ne 128 -or
+        (Read-UInt32LE $font 20) -ne 144 -or (Read-UInt32LE $font 24) -ne 24 -or
+        (Read-UInt32LE $font 28) -ne 12 -or $font.Length -ne 18464) {
+        throw "Asset '$Path' is not the required 128-glyph 12x24 alpha4 font."
     }
 }
 
@@ -146,13 +146,13 @@ if ($null -ne $definition.PSObject.Properties['assets']) {
 if ($assets.Count -gt 8) { throw 'Module definition cannot contain more than 8 assets.' }
 foreach ($asset in $assets) {
     $kind = ([string]$asset.kind).ToLowerInvariant()
-    if ($kind -ne 'psf2_font') { throw "Unknown system asset kind '$kind'." }
-    if ([string]$asset.license -cne 'MIT') {
-        throw "The PSF2 font asset must carry its explicit MIT license identifier."
+    if ($kind -ne 'alpha4_font') { throw "Unknown system asset kind '$kind'." }
+    if ([string]$asset.license -cne 'OFL-1.1') {
+        throw "The alpha4 font asset must carry its explicit OFL-1.1 license identifier."
     }
     $source = [System.IO.Path]::GetFullPath((Join-Path $definitionRoot ([string]$asset.source)))
     if (-not [System.IO.File]::Exists($source)) { throw "Asset source '$source' does not exist." }
-    Assert-Psf2Font $source
+    Assert-Alpha4Font $source
     $espPath = Get-NormalizedEspPath ([string]$asset.esp_path)
     $pathKey = $espPath.ToUpperInvariant()
     if ($seenPath.ContainsKey($pathKey)) { throw "Duplicate ESP path '$espPath'." }

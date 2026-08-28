@@ -115,6 +115,52 @@ static void test_injected_hash_collision_defers_to_authoritative_extension(void)
     ));
 }
 
+static void test_extension_query_canonicalization_accepts_dot_and_ascii_case(void)
+{
+    ios_u8 extension[IOS_FS_EXTENSION_SIZE];
+    ios_size length;
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("doc", 3, extension, &length), IOS_OK
+    );
+    IOS_TEST_ASSERT(length == 3 && memcmp(extension, "DOC", 3) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize(".DoC", 4, extension, &length), IOS_OK
+    );
+    IOS_TEST_ASSERT(length == 3 && memcmp(extension, "DOC", 3) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("x", 1, extension, &length), IOS_OK
+    );
+    IOS_TEST_ASSERT(length == 1 && extension[0] == 'X');
+}
+
+static void test_extension_query_canonicalization_rejects_invalid_text(void)
+{
+    ios_u8 extension[IOS_FS_EXTENSION_SIZE];
+    ios_size length;
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("", 0, extension, &length),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize(".", 1, extension, &length),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("D.OC", 4, extension, &length),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("DOC/", 4, extension, &length),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_extension_query_canonicalize("TOOLONG", 7, extension, &length),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+}
+
 static ios_u8 *directory_slot(ios_u8 *slots, ios_size index)
 {
     return slots + index * IOS_FS_PRIMARY_RECORD_SIZE;
@@ -204,6 +250,8 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_companion_exact_layout_and_pair_validation),
     IOS_TEST_CASE(test_pair_rejects_integrity_and_association_mismatches),
     IOS_TEST_CASE(test_injected_hash_collision_defers_to_authoritative_extension),
+    IOS_TEST_CASE(test_extension_query_canonicalization_accepts_dot_and_ascii_case),
+    IOS_TEST_CASE(test_extension_query_canonicalization_rejects_invalid_text),
     IOS_TEST_CASE(test_directory_scan_exposes_pair_once_and_skips_deleted_slots),
     IOS_TEST_CASE(test_directory_scan_rejects_orphans_incomplete_pairs_and_duplicates),
     IOS_TEST_CASE(test_pair_allocation_never_crosses_cluster_boundary)

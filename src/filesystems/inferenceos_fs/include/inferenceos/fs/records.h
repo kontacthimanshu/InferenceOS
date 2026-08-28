@@ -73,6 +73,12 @@ ios_status ios_fs_name_extension(
     ios_u8 output[IOS_FS_EXTENSION_SIZE],
     ios_size *length
 );
+ios_status ios_fs_extension_query_canonicalize(
+    const char *input,
+    ios_size input_length,
+    ios_u8 output[IOS_FS_EXTENSION_SIZE],
+    ios_size *output_length
+);
 ios_u32 ios_fs_fnv1a32(const void *bytes, ios_size length);
 void ios_fs_hash_text(ios_u32 hash, ios_u8 output[IOS_FS_HASH_TEXT_SIZE]);
 ios_u8 ios_fs_primary_name_checksum(const ios_u8 name[IOS_FS_NAME_SIZE]);

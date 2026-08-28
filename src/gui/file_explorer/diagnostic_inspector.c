@@ -7,7 +7,7 @@ enum {
     INSPECTOR_HEADER = UINT32_C(0x002f6f9f),
     INSPECTOR_FOREGROUND = UINT32_C(0x00f2f2f2),
     INSPECTOR_ERROR = UINT32_C(0x00ff8080),
-    INSPECTOR_LINE_HEIGHT = 18
+    INSPECTOR_LINE_HEIGHT = 26
 };
 
 static ios_status query(
@@ -129,7 +129,7 @@ static ios_status render_fat(struct ios_file_explorer_diagnostic_inspector *insp
     if (IOS_FAILED(status)) return status;
     for (ios_size index = 0; index < info->cluster_count; ++index) {
         const ios_i32 row = (ios_i32)index + 1;
-        if (26 + row * INSPECTOR_LINE_HEIGHT + IOS_PSF2_FONT_HEIGHT
+        if (26 + row * INSPECTOR_LINE_HEIGHT + (ios_i32)inspector->font->height
             > (ios_i32)inspector->surface.height) break;
         status = draw_line(inspector, row, "Cluster: ", NULL, 0, info->clusters[index], true);
         if (IOS_FAILED(status)) return status;

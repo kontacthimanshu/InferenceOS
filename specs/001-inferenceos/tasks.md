@@ -340,11 +340,11 @@ disabled mode passes all mandatory tests.
 
 - [X] T121 [P] Run and document static dependency/VFS-boundary enforcement in `tools/test/validate_dependencies.ps1`
 - [X] T122 [P] Add full SC-001-SC-020 traceability report generator in `tools/test/generate_validation_report.ps1`
-- [ ] T123 Run the complete dual-compiler, host, integration, fault, and QEMU matrix and archive evidence under `build/validation/`
+- [X] T123 Run the complete dual-compiler, host, integration, fault, and QEMU matrix and archive evidence under `build/validation/`
 - [X] T124 [P] Document InferenceOS-FS format, extension hash, and recovery states in `docs/inferenceos-fs.md`
 - [X] T125 [P] Document CUI commands, GUI architecture, and application contracts in `docs/cui.md`, `docs/gui.md`, and `docs/applications.md`
-- [ ] T126 Validate the clean-checkout workflow against `specs/001-inferenceos/quickstart.md`
-- [ ] T127 Perform final Constitution Check and release-claim audit in `docs/validation/constitution-check.md`
+- [X] T126 Validate the clean-checkout workflow against `specs/001-inferenceos/quickstart.md`
+- [X] T127 Perform final Constitution Check and release-claim audit in `docs/validation/constitution-check.md`
 
 ---
 
@@ -448,4 +448,4 @@ specification and Constitution.
 - [X] T131 CRITICAL Add the live kernel composition root that initializes interrupts and PS/2 input, storage/cache/VFS/InferenceOS-FS, the complete shared CUI command registry, Shell IPC services, desktop/terminal/File Explorer, diagnostics, and synchronized q35 reboot/shutdown while preserving CUI recovery on GUI failure in `src/kernel/runtime.c`, `src/cui/`, `src/shell/`, and the affected driver/service adapters (missing; Constitution I, II, VII, VIII, and X, User Stories 1, 2, 4, 5, and 11, FR-016 through FR-030, FR-042 through FR-044, FR-179, SC-001 through SC-004)
 - [X] T132 CRITICAL Create the freestanding user runtime and separately linked static ELF64 system-application images for Shell, GUI desktop, GUI terminal, File Explorer, proprietary test, and custom test, with CRT entry points plus versioned syscall/IPC client glue and no direct filesystem-driver linkage, in `src/runtime/user/`, `src/applications/`, `src/shell/`, `src/gui/`, and `CMakeLists.txt` (missing; Constitution I through IV, plan Technical Context application model, FR-027 through FR-040, FR-217 through FR-224, and SC-011 through SC-014)
 - [X] T133 HIGH Generate the versioned `system_modules.json`, hashes, symbols/maps, licensed PSF2 font asset, and complete ESP directly from the kernel and application targets so `inferenceos-image` has no external prebuilt kernel/module inputs, updating `CMakeLists.txt`, `tools/image/build_system_modules.ps1`, `tools/image/build_esp.ps1`, and the documented clean-build workflow (partial; Constitution VIII and XI, plan Primary Dependencies, FR-232, FR-254 through FR-258, SC-018 through SC-020, and the implementation claims of T024, T027, T109, and T112)
-- [ ] T134 HIGH Implement the guest-side q35 test-control protocol and stable serial evidence markers for boot/GUI recovery, input, format/mount, file and directory workflows, persistence cycles, fault injection, and registry benchmark counters, then bind the existing release suites to those real guest actions in `src/kernel/test_control.c`, the affected runtime services, `tools/test/run_inferenceos.ps1`, and `tools/test/run_qemu_tests.ps1` (missing; Constitution XI, FR-239 through FR-253, SC-001 through SC-020, and T123)
+- [X] T134 HIGH Implement the guest-side q35 test-control protocol and stable serial evidence markers for boot/GUI recovery, input, format/mount, file and directory workflows, persistence cycles, fault injection, and registry benchmark counters, then bind the existing release suites to those real guest actions in `src/kernel/test_control.c`, the affected runtime services, `tools/test/run_inferenceos.ps1`, and `tools/test/run_qemu_tests.ps1` (missing; Constitution XI, FR-239 through FR-253, SC-001 through SC-020, and T123)

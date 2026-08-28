@@ -127,7 +127,9 @@ static void test_inspector_uses_selected_opaque_identity_and_bounded_dtos(void)
     ios_u32 pixels[320 * 160] = { 0 };
     ios_u8 glyphs[128 * 16] = { 0 };
     struct ios_graphics_surface surface = { pixels, 320, 160, 320 };
-    struct ios_psf2_font font = { glyphs, sizeof(glyphs), 128, 16, 8, 16 };
+    struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
     initialize_fixture(&model, &process, &mount, &fixture, &service, &authority, &handle);
     provider_context = (struct diagnostic_provider_context){ &service, &process, handle };
     IOS_TEST_ASSERT_STATUS(ios_file_explorer_diagnostic_inspector_initialize(
@@ -162,7 +164,9 @@ static void test_inspector_navigation_and_close_clear_privileged_state(void)
     ios_u32 pixels[320 * 160] = { 0 };
     ios_u8 glyphs[128 * 16] = { 0 };
     struct ios_graphics_surface surface = { pixels, 320, 160, 320 };
-    struct ios_psf2_font font = { glyphs, sizeof(glyphs), 128, 16, 8, 16 };
+    struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
     struct ios_input_event right = {
         .type = IOS_INPUT_EVENT_KEY, .flags = IOS_INPUT_PRESSED, .code = IOS_KEY_RIGHT
     };
@@ -208,7 +212,9 @@ static void test_inspector_refuses_under_scoped_authority(void)
     ios_u32 pixels[320 * 160] = { 0 };
     ios_u8 glyphs[128 * 16] = { 0 };
     struct ios_graphics_surface surface = { pixels, 320, 160, 320 };
-    struct ios_psf2_font font = { glyphs, sizeof(glyphs), 128, 16, 8, 16 };
+    struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
     initialize_fixture(&model, &process, &mount, &fixture, &service, &authority, &handle);
     authority.scope = IOS_FS_DIAGNOSTIC_SCOPE_FILESYSTEM;
     provider_context = (struct diagnostic_provider_context){ &service, &process, handle };

@@ -34,6 +34,12 @@ struct diagnostic_fixture {
     struct ios_fs_companion_disk companion;
     ios_u32 fat[8];
 };
+struct fake_extension_search {
+    struct ios_vfs_search_result entries[IOS_VFS_SEARCH_RESULT_CAPACITY];
+    ios_size count;
+    bool truncated;
+    char observed[IOS_EXTENSION_SEARCH_INPUT_CAPACITY + 1];
+};
 
 static void capture(const char *text, void *opaque)
 {
@@ -94,6 +100,27 @@ static ios_status dispatch(
     struct ios_cui_parsed_line line;
     IOS_TEST_ASSERT(ios_cui_parse_line(command, &line) == IOS_CUI_PARSE_OK);
     return ios_cui_command_dispatch(registry, &line, io);
+}
+
+static ios_status fake_extension_search_results(
+    void *opaque,
+    const char *extension,
+    ios_size extension_length,
+    struct ios_vfs_search_result *entries,
+    ios_size capacity,
+    ios_size *entry_count,
+    bool *truncated
+)
+{
+    struct fake_extension_search *search = opaque;
+    if (extension_length > IOS_EXTENSION_SEARCH_INPUT_CAPACITY
+        || search->count > capacity) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    memcpy(search->observed, extension, extension_length);
+    search->observed[extension_length] = '\0';
+    memcpy(entries, search->entries, search->count * sizeof(*entries));
+    *entry_count = search->count;
+    *truncated = search->truncated;
+    return IOS_OK;
 }
 
 static ios_status diagnostic_snapshot(
@@ -298,8 +325,22 @@ static void test_storage_commands_format_mount_report_unmount_and_remount(void)
     IOS_TEST_ASSERT_STATUS(dispatch("diskinfo disk0", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strstr(output.bytes, "disk0 status=ready sector_size=512") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "capacity_bytes=50000000000") != NULL);
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "filesystem=none filesystem_state=blank mount_state=unmounted"
+    ) != NULL);
     IOS_TEST_ASSERT_STATUS(dispatch("format disk0", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(dispatch("diskinfo disk0", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "filesystem=InferenceOS-FS filesystem_state=recognized mount_state=unmounted"
+    ) != NULL);
     IOS_TEST_ASSERT_STATUS(dispatch("mount disk0 /", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(dispatch("diskinfo disk0", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "filesystem=InferenceOS-FS filesystem_state=mounted mount_state=read_write"
+    ) != NULL);
     IOS_TEST_ASSERT_STATUS(dispatch("fsinfo", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strstr(output.bytes, "filesystem=InferenceOS-FS format_version=1") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "mount_state=read_write total_bytes=50000000000") != NULL);
@@ -310,6 +351,33 @@ static void test_storage_commands_format_mount_report_unmount_and_remount(void)
     IOS_TEST_ASSERT_STATUS(dispatch("mount disk0 /", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT_STATUS(dispatch("fsinfo", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(disk.flush_count == 2 && mounts.root == &filesystem.vfs);
+}
+
+static void test_diskinfo_reports_unrecognized_foreign_media(void)
+{
+    struct sparse_disk disk = {
+        .sector_count = IOS_FS_MINIMUM_VOLUME_BYTES / IOS_FS_SECTOR_SIZE
+    };
+    struct ios_block_device device;
+    struct ios_vfs_mount_registry mounts;
+    struct ios_fs_mount filesystem;
+    struct ios_cui_fs_context context;
+    struct ios_cui_command_registry commands;
+    struct output_buffer output = { 0 };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
+    disk.sectors[0][0] = 0x7f;
+    IOS_TEST_ASSERT_STATUS(initialize_device(&device, &disk), IOS_OK);
+    vfs_mount_registry_initialize(&mounts);
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(ios_cui_fs_add_device(&context, &device), IOS_OK);
+    ios_cui_command_registry_initialize(&commands);
+    IOS_TEST_ASSERT_STATUS(ios_cui_register_fs_commands(&commands), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(dispatch("diskinfo disk0", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "filesystem=unknown filesystem_state=foreign mount_state=unmounted"
+    ) != NULL);
 }
 
 static void test_commands_reject_bad_devices_paths_and_unsafe_state(void)
@@ -685,8 +753,85 @@ static void test_internal_diagnostics_require_an_explicit_binding(void)
     IOS_TEST_ASSERT(output.length == 0);
 }
 
+static void test_search_command_renders_paths_empty_and_truncated_results(void)
+{
+    struct ios_vfs_mount_registry mounts;
+    struct ios_vfs_mount mount = { 0 };
+    struct ios_vfs_object root = {
+        IOS_VFS_ROOT_OBJECT_ID, IOS_VFS_OBJECT_DIRECTORY, 0
+    };
+    struct ios_block_device search_device = { 0 };
+    struct ios_fs_mount filesystem;
+    struct fake_extension_search source = { 0 };
+    struct ios_extension_search_service service;
+    struct ios_process caller = { .process_id = 41, .application_identity = 42 };
+    struct ios_cui_fs_context context;
+    struct ios_cui_command_registry commands;
+    struct output_buffer output = { 0 };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
+
+    vfs_mount_registry_initialize(&mounts);
+    mount.driver_name = "test";
+    mount.driver_context = &source;
+    mount.device = &search_device;
+    mount.root = &root;
+    mount.state = IOS_MOUNT_RW;
+    mount.search_extension = fake_extension_search_results;
+    IOS_TEST_ASSERT_STATUS(vfs_mount_root(&mounts, &mount, "/"), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_extension_search_service_initialize(&service, &mounts), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_fs_set_extension_search_service(&context, &service, &caller), IOS_OK
+    );
+    ios_cui_command_registry_initialize(&commands);
+    IOS_TEST_ASSERT_STATUS(ios_cui_register_fs_commands(&commands), IOS_OK);
+
+    source.count = IOS_VFS_SEARCH_RESULT_CAPACITY;
+    source.truncated = true;
+    source.entries[0].object_identity = 10;
+    strcpy(source.entries[0].display_path, "/REPORT");
+    source.entries[0].display_path_length = 7;
+    source.entries[1].object_identity = 11;
+    strcpy(source.entries[1].display_path, "/WORK/ARCHIVE");
+    source.entries[1].display_path_length = 13;
+    for (ios_size index = 2; index < source.count; ++index) {
+        source.entries[index].object_identity = 10 + index;
+        strcpy(source.entries[index].display_path, "/MORE");
+        source.entries[index].display_path_length = 5;
+    }
+    IOS_TEST_ASSERT_STATUS(dispatch("search .DoC", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(source.observed, "DOC") == 0);
+    IOS_TEST_ASSERT(strncmp(output.bytes, "/REPORT\n/WORK/ARCHIVE\n", 22) == 0);
+    IOS_TEST_ASSERT(strstr(output.bytes, "results truncated\n") != NULL);
+    IOS_TEST_ASSERT(strstr(output.bytes, ".DOC") == NULL);
+    IOS_TEST_ASSERT(strstr(output.bytes, "E771F04F") == NULL);
+
+    memset(&output, 0, sizeof(output));
+    source.count = 0;
+    source.truncated = false;
+    IOS_TEST_ASSERT_STATUS(dispatch("search ZIP", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(output.bytes, "no matches\n") == 0);
+
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("search", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("search DOC extra", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("search TOOLONG", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT(output.length == 0);
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_storage_commands_format_mount_report_unmount_and_remount),
+    IOS_TEST_CASE(test_diskinfo_reports_unrecognized_foreign_media),
     IOS_TEST_CASE(test_commands_reject_bad_devices_paths_and_unsafe_state),
     IOS_TEST_CASE(test_mount_commands_report_diagnostic_and_rejected_states),
     IOS_TEST_CASE(test_file_commands_share_provider_and_preserve_quoted_content),
@@ -698,6 +843,7 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_directory_navigation_and_mutation_commands_use_shared_provider),
     IOS_TEST_CASE(test_directory_commands_validate_arity_and_optional_operations),
     IOS_TEST_CASE(test_privileged_diagnostic_commands_render_authoritative_dtos),
-    IOS_TEST_CASE(test_internal_diagnostics_require_an_explicit_binding)
+    IOS_TEST_CASE(test_internal_diagnostics_require_an_explicit_binding),
+    IOS_TEST_CASE(test_search_command_renders_paths_empty_and_truncated_results)
 };
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

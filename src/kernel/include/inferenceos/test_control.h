@@ -28,6 +28,7 @@ struct ios_test_control {
     void *dispatch_context;
     char line[IOS_TEST_CONTROL_LINE_CAPACITY + 1];
     ios_size line_length;
+    ios_u32 last_sequence;
     bool discarding_line;
 };
 

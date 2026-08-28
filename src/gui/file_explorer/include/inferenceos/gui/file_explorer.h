@@ -11,8 +11,10 @@
 enum {
     IOS_FILE_EXPLORER_ENTRY_CAPACITY = 64,
     IOS_FILE_EXPLORER_HISTORY_CAPACITY = 16,
-    IOS_FILE_EXPLORER_ROW_HEIGHT = 20,
-    IOS_FILE_EXPLORER_ICON_SIZE = 12
+    IOS_FILE_EXPLORER_HEADER_HEIGHT = 28,
+    IOS_FILE_EXPLORER_CELL_WIDTH = 96,
+    IOS_FILE_EXPLORER_CELL_HEIGHT = 92,
+    IOS_FILE_EXPLORER_ICON_SIZE = 32
 };
 
 enum ios_file_explorer_diagnostic_page {
@@ -96,6 +98,7 @@ struct ios_file_explorer_window {
     ios_u32 background_color;
     ios_u32 selection_color;
     ios_u32 foreground_color;
+    ios_size first_visible_index;
 };
 
 struct ios_file_explorer_client {

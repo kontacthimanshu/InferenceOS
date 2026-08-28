@@ -7,7 +7,8 @@
 
 static bool valid_file_icon(enum ios_presentation_icon icon)
 {
-    return icon == IOS_ICON_TEXT || icon == IOS_ICON_IMAGE || icon == IOS_ICON_APPLICATION;
+    return icon == IOS_ICON_GENERIC_FILE || icon == IOS_ICON_TEXT
+        || icon == IOS_ICON_IMAGE || icon == IOS_ICON_APPLICATION;
 }
 
 static ios_u32 generation_from_boot_identity(ios_u64 identity)

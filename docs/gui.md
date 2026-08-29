@@ -156,7 +156,7 @@ DTO or application contract.
 ## DOC Viewer application
 
 GUI mode also starts the optional `DOC Viewer` ring-3 application. Its managed window is titled
-`DOC Files App` and occupies the lower-right desktop region below File Explorer. The application asks
+`DOC Files App` and occupies the lower-right desktop region below the TXT Viewer. The application asks
 Shell for a paged `TYPE_VIEW` of the mounted root using the boot-generation opaque capability for
 the authoritative DOC type. It never parses names or receives `.DOC`, extension bytes, or hashes.
 The window opens as a File Explorer view and its header displays the current display-safe folder,
@@ -171,8 +171,9 @@ as `doc-viewer.elf` with application identity 4103.
 ## TXT Viewer application
 
 GUI mode also starts the optional `TXT Viewer` ring-3 application. Its managed window is titled
-`TXT Files App` and occupies the left desktop region. It requests a paged
-`TYPE_VIEW` of the mounted root using only the boot-generation opaque capability for the
+`TXT Files App` and occupies the upper-right desktop region. File Explorer occupies the larger left
+region, with more display area than both filtered viewer applications combined. TXT Viewer requests
+a paged `TYPE_VIEW` of the mounted root using only the boot-generation opaque capability for the
 authoritative TXT type. Its File Explorer view starts at `Folder: /` and updates the display-safe
 current-folder label during navigation.
 

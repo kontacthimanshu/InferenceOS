@@ -19,7 +19,8 @@ enum {
     SYNTH_HID_INITIAL_DEVICE_INFO_ACK = 3,
     SYNTH_HID_INPUT_REPORT = 4,
     SYNTH_HID_VERSION_2_0 = 0x00020000,
-    SYNTH_HID_PIPE_MESSAGE_DATA = 1
+    SYNTH_HID_PIPE_MESSAGE_DATA = 1,
+    SYNTH_HID_MOUSE_LOGICAL_MAXIMUM = 0x7fff
 };
 
 struct IOS_PACKED synth_keyboard_protocol_request {
@@ -284,10 +285,18 @@ ios_status hyperv_mouse_handle_report(
     }
     raw_x = (ios_u16)(report[1] | ((ios_u16)report[2] << 8));
     raw_y = (ios_u16)(report[3] | ((ios_u16)report[4] << 8));
+    if (raw_x > SYNTH_HID_MOUSE_LOGICAL_MAXIMUM) {
+        raw_x = SYNTH_HID_MOUSE_LOGICAL_MAXIMUM;
+    }
+    if (raw_y > SYNTH_HID_MOUSE_LOGICAL_MAXIMUM) {
+        raw_y = SYNTH_HID_MOUSE_LOGICAL_MAXIMUM;
+    }
     target_x = mouse->queue->pointer_width <= 1 ? 0
-        : (ios_i32)(((ios_u64)raw_x * (ios_u32)(mouse->queue->pointer_width - 1)) / 0xffffU);
+        : (ios_i32)(((ios_u64)raw_x * (ios_u32)(mouse->queue->pointer_width - 1))
+            / SYNTH_HID_MOUSE_LOGICAL_MAXIMUM);
     target_y = mouse->queue->pointer_height <= 1 ? 0
-        : (ios_i32)(((ios_u64)raw_y * (ios_u32)(mouse->queue->pointer_height - 1)) / 0xffffU);
+        : (ios_i32)(((ios_u64)raw_y * (ios_u32)(mouse->queue->pointer_height - 1))
+            / SYNTH_HID_MOUSE_LOGICAL_MAXIMUM);
     if (target_x != mouse->queue->pointer_x || target_y != mouse->queue->pointer_y) {
         move_status = input_emit_pointer_move(mouse->queue, timestamp_ticks,
             target_x - mouse->queue->pointer_x, target_y - mouse->queue->pointer_y);

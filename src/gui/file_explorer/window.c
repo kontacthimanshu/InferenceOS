@@ -154,6 +154,62 @@ static void ensure_selection_visible(struct ios_file_explorer_window *window)
     }
 }
 
+static void copy_location(char *destination, const char *source)
+{
+    ios_size length = source == NULL ? 0 : strnlen(
+        source, IOS_FILE_EXPLORER_LOCATION_CAPACITY - 1U
+    );
+    if (length != 0) memcpy(destination, source, length);
+    destination[length] = '\0';
+}
+
+static void set_directory_location(
+    struct ios_file_explorer_window *window, const char *directory_name
+)
+{
+    static const char prefix[] = "Folder: ";
+    const ios_size name_capacity = IOS_FILE_EXPLORER_LOCATION_CAPACITY - sizeof(prefix);
+    const ios_size name_length = strnlen(directory_name, name_capacity);
+    memcpy(window->location_storage, prefix, sizeof(prefix) - 1U);
+    memcpy(window->location_storage + sizeof(prefix) - 1U, directory_name, name_length);
+    window->location_storage[sizeof(prefix) - 1U + name_length] = '\0';
+    window->location = window->location_storage;
+}
+
+static ios_status activate_selection(
+    struct ios_file_explorer_window *window,
+    bool *activated,
+    ios_u64 *activated_handle
+)
+{
+    const struct ios_display_safe_entry *entry =
+        ios_file_explorer_model_selected(window->model);
+    char directory_name[IOS_DISPLAY_SAFE_NAME_CAPACITY];
+    ios_size history_index;
+    bool directory;
+    ios_status status;
+
+    if (entry == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
+    directory = entry->object_kind == IOS_DISPLAY_SAFE_DIRECTORY;
+    history_index = window->model->history_count;
+    if (directory) {
+        if (history_index >= IOS_FILE_EXPLORER_HISTORY_CAPACITY) {
+            return IOS_ERROR(IOS_E_NO_SPACE);
+        }
+        copy_location(window->location_history[history_index], window->location);
+        memcpy(directory_name, entry->display_name, entry->display_name_length + 1U);
+    }
+    status = ios_file_explorer_model_activate(window->model, activated_handle);
+    if (IOS_SUCCEEDED(status)) {
+        *activated = true;
+        if (directory) {
+            window->first_visible_index = 0;
+            set_directory_location(window, directory_name);
+        }
+    }
+    return status;
+}
+
 ios_status ios_file_explorer_window_initialize(
     struct ios_file_explorer_window *window,
     struct ios_file_explorer_model *model,
@@ -172,6 +228,9 @@ ios_status ios_file_explorer_window_initialize(
     window->model = model;
     window->surface = surface;
     window->font = font;
+    window->title = "Files";
+    copy_location(window->location_storage, "Folder: /");
+    window->location = window->location_storage;
     window->background_color = FILE_EXPLORER_BACKGROUND;
     window->selection_color = FILE_EXPLORER_SELECTION;
     window->foreground_color = FILE_EXPLORER_FOREGROUND;
@@ -192,10 +251,25 @@ ios_status ios_file_explorer_window_render(struct ios_file_explorer_window *wind
         0, 0, (ios_i32)window->surface.width, IOS_FILE_EXPLORER_HEADER_HEIGHT
     }, FILE_EXPLORER_HEADER);
     ios_status status = ios_graphics_draw_text(
-        &window->surface, window->font, "Files", 8, 2,
+        &window->surface, window->font,
+        window->title == NULL ? "Files" : window->title, 8, 2,
         FILE_EXPLORER_ICON_PAGE, FILE_EXPLORER_HEADER, false
     );
     if (IOS_FAILED(status)) return status;
+    if (window->location != NULL) {
+        const ios_size location_length = strnlen(
+            window->location, window->surface.width / window->font->width
+        );
+        const ios_size location_width = location_length * window->font->width;
+        if (location_length != 0 && location_width + 8U < window->surface.width) {
+            status = ios_graphics_draw_text(
+                &window->surface, window->font, window->location,
+                (ios_i32)(window->surface.width - location_width - 8U), 2,
+                FILE_EXPLORER_ICON_PAGE, FILE_EXPLORER_HEADER, false
+            );
+            if (IOS_FAILED(status)) return status;
+        }
+    }
     if (window->first_visible_index >= window->model->entry_count) {
         window->first_visible_index = 0;
     }
@@ -253,13 +327,27 @@ ios_status ios_file_explorer_window_handle_input(
         const ios_size index = window->first_visible_index
             + row * column_count(window) + column;
         if (index < window->model->entry_count) {
-            return ios_file_explorer_model_select(window->model, index);
+            ios_status status = ios_file_explorer_model_select(window->model, index);
+            if (IOS_FAILED(status)) return status;
+            if (window->has_pending_click && window->last_click_index == index
+                && event->timestamp_ticks >= window->last_click_ticks
+                && event->timestamp_ticks - window->last_click_ticks
+                    <= IOS_FILE_EXPLORER_DOUBLE_CLICK_TICKS) {
+                window->has_pending_click = false;
+                return activate_selection(window, activated, activated_handle);
+            }
+            window->last_click_index = index;
+            window->last_click_ticks = event->timestamp_ticks;
+            window->has_pending_click = true;
+            return IOS_OK;
         }
+        window->has_pending_click = false;
         return IOS_OK;
     }
     if (event->type != IOS_INPUT_EVENT_KEY || (event->flags & IOS_INPUT_PRESSED) == 0) {
         return IOS_OK;
     }
+    window->has_pending_click = false;
     if (event->code == IOS_KEY_LEFT || event->code == IOS_KEY_RIGHT
         || event->code == IOS_KEY_UP || event->code == IOS_KEY_DOWN) {
         if (window->model->entry_count == 0) return IOS_OK;
@@ -276,18 +364,18 @@ ios_status ios_file_explorer_window_handle_input(
         return status;
     }
     if (event->code == IOS_KEY_ENTER && window->model->has_selection) {
-        const bool directory = window->model->entries[window->model->selected_index].object_kind
-            == IOS_DISPLAY_SAFE_DIRECTORY;
-        ios_status status = ios_file_explorer_model_activate(window->model, activated_handle);
-        if (IOS_SUCCEEDED(status)) {
-            *activated = true;
-            if (directory) window->first_visible_index = 0;
-        }
-        return status;
+        return activate_selection(window, activated, activated_handle);
     }
     if (event->code == IOS_KEY_BACKSPACE) {
         ios_status status = ios_file_explorer_model_navigate_back(window->model);
-        if (IOS_SUCCEEDED(status)) window->first_visible_index = 0;
+        if (IOS_SUCCEEDED(status)) {
+            window->first_visible_index = 0;
+            copy_location(
+                window->location_storage,
+                window->location_history[window->model->history_count]
+            );
+            window->location = window->location_storage;
+        }
         return status;
     }
     return IOS_OK;

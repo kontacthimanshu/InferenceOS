@@ -10,6 +10,7 @@
 #include <inferenceos/drivers/ps2.h>
 #include <inferenceos/drivers/hyperv/platform.h>
 #include <inferenceos/drivers/serial.h>
+#include <inferenceos/doc_viewer.h>
 #include <inferenceos/file_view.h>
 #include <inferenceos/extension_search.h>
 #include <inferenceos/fs/file_service.h>
@@ -26,6 +27,7 @@
 #include <inferenceos/shell_protocol.h>
 #include <inferenceos/syscall.h>
 #include <inferenceos/test_control.h>
+#include <inferenceos/txt_viewer.h>
 #include <inferenceos/type_capability.h>
 #include <inferenceos/type_catalog.h>
 #include <inferenceos/vfs.h>
@@ -33,12 +35,25 @@
 enum {
     IOS_RUNTIME_FRAMEBUFFER_WIDTH = 1024,
     IOS_RUNTIME_FRAMEBUFFER_HEIGHT = 768,
-    IOS_RUNTIME_TERMINAL_WIDTH = 640,
-    IOS_RUNTIME_TERMINAL_HEIGHT = 384,
     IOS_RUNTIME_EXPLORER_WIDTH = 320,
     IOS_RUNTIME_EXPLORER_HEIGHT = 360,
     IOS_RUNTIME_EXPLORER_X = 672,
-    IOS_RUNTIME_EXPLORER_Y = 32
+    IOS_RUNTIME_EXPLORER_Y = 32,
+    IOS_RUNTIME_DOC_VIEWER_WIDTH = 320,
+    IOS_RUNTIME_DOC_VIEWER_HEIGHT = 328,
+    IOS_RUNTIME_DOC_VIEWER_X = 672,
+    IOS_RUNTIME_DOC_VIEWER_Y = 408,
+    IOS_RUNTIME_TXT_VIEWER_WIDTH = 624,
+    IOS_RUNTIME_TXT_VIEWER_HEIGHT = 704,
+    IOS_RUNTIME_TXT_VIEWER_X = 32,
+    IOS_RUNTIME_TXT_VIEWER_Y = 32
+};
+
+enum ios_runtime_gui_focus {
+    IOS_RUNTIME_GUI_FOCUS_NONE,
+    IOS_RUNTIME_GUI_FOCUS_FILE_EXPLORER,
+    IOS_RUNTIME_GUI_FOCUS_DOC_VIEWER,
+    IOS_RUNTIME_GUI_FOCUS_TXT_VIEWER
 };
 
 struct ios_kernel_runtime_state {
@@ -60,6 +75,8 @@ struct ios_kernel_runtime_state {
     struct ios_power_controller power;
     struct ios_type_catalog type_catalog;
     ios_type_icon_capability generic_file_capability;
+    ios_type_icon_capability doc_type_capability;
+    ios_type_icon_capability txt_type_capability;
     struct ios_application_binding_registry bindings;
     struct ios_type_capability_service type_capabilities;
     struct ios_file_view_service file_view;
@@ -71,6 +88,12 @@ struct ios_kernel_runtime_state {
     struct ios_file_explorer_model file_explorer_model;
     struct ios_file_explorer_window file_explorer_window;
     struct ios_window_handle file_explorer_native_window;
+    struct ios_doc_viewer_application doc_viewer;
+    struct ios_window_handle doc_viewer_native_window;
+    struct ios_process *doc_viewer_process;
+    struct ios_txt_viewer_application txt_viewer;
+    struct ios_window_handle txt_viewer_native_window;
+    struct ios_process *txt_viewer_process;
     struct ios_fs_diagnostic_service diagnostics;
     struct ios_fs_diagnostic_authority diagnostic_authority;
     struct ios_process *role_process[IOS_MODULE_ROLE_TEST_APPLICATION + 1];
@@ -83,13 +106,23 @@ struct ios_kernel_runtime_state {
     bool path_ready;
     bool file_explorer_ready;
     bool file_explorer_view_running;
+    bool doc_viewer_ready;
+    bool doc_viewer_view_running;
+    bool txt_viewer_ready;
+    bool txt_viewer_view_running;
+    enum ios_runtime_gui_focus gui_focus;
     bool initialized;
 };
 
 static struct ios_kernel_runtime_state runtime_state;
 static ios_u32 shadow_pixels[IOS_RUNTIME_FRAMEBUFFER_WIDTH * IOS_RUNTIME_FRAMEBUFFER_HEIGHT];
-static ios_u32 terminal_pixels[IOS_RUNTIME_TERMINAL_WIDTH * IOS_RUNTIME_TERMINAL_HEIGHT];
 static ios_u32 explorer_pixels[IOS_RUNTIME_EXPLORER_WIDTH * IOS_RUNTIME_EXPLORER_HEIGHT];
+static ios_u32 doc_viewer_pixels[
+    IOS_RUNTIME_DOC_VIEWER_WIDTH * IOS_RUNTIME_DOC_VIEWER_HEIGHT
+];
+static ios_u32 txt_viewer_pixels[
+    IOS_RUNTIME_TXT_VIEWER_WIDTH * IOS_RUNTIME_TXT_VIEWER_HEIGHT
+];
 
 enum {
     IOS_TEST_UART_BASE = 0x2f8,
@@ -654,7 +687,15 @@ static ios_status launch_process(struct ios_process *process, void *context)
     }
     status = scheduler_add_process(process);
     if (IOS_FAILED(status)) return status;
-    if (process->module_role != IOS_MODULE_ROLE_TEST_APPLICATION) {
+    if (process->module_role == IOS_MODULE_ROLE_TEST_APPLICATION) {
+        if (process->application_identity == IOS_DOC_VIEWER_APPLICATION_ID) {
+            state->doc_viewer_process = process;
+            state->doc_viewer_ready = true;
+        } else if (process->application_identity == IOS_TXT_VIEWER_APPLICATION_ID) {
+            state->txt_viewer_process = process;
+            state->txt_viewer_ready = true;
+        }
+    } else {
         state->role_process[process->module_role] = process;
     }
     return IOS_OK;
@@ -1043,7 +1084,20 @@ static ios_status start_file_explorer_view(struct ios_kernel_runtime_state *stat
     );
     if (IOS_FAILED(status)) return status;
     state->file_explorer_view_running = true;
+    state->gui_focus = IOS_RUNTIME_GUI_FOCUS_FILE_EXPLORER;
     return IOS_OK;
+}
+
+static void repaint_file_explorer(struct ios_kernel_runtime_state *state)
+{
+    (void)ios_file_explorer_window_render(&state->file_explorer_window);
+    (void)ios_window_invalidate(
+        &state->shell.desktop.window_manager,
+        state->file_explorer_native_window,
+        (struct ios_graphics_rect){
+            0, 0, IOS_RUNTIME_EXPLORER_WIDTH, IOS_RUNTIME_EXPLORER_HEIGHT
+        }
+    );
 }
 
 static void route_file_explorer_pointer(
@@ -1054,28 +1108,271 @@ static void route_file_explorer_pointer(
     bool activated;
     ios_u64 activated_handle;
 
-    if (!state->file_explorer_view_running) return;
+    if (!state->file_explorer_view_running
+        || event->x < IOS_RUNTIME_EXPLORER_X
+        || event->y < IOS_RUNTIME_EXPLORER_Y
+        || event->x >= IOS_RUNTIME_EXPLORER_X + IOS_RUNTIME_EXPLORER_WIDTH
+        || event->y >= IOS_RUNTIME_EXPLORER_Y + IOS_RUNTIME_EXPLORER_HEIGHT) return;
+    if ((event->flags & IOS_INPUT_PRESSED) != 0) {
+        state->gui_focus = IOS_RUNTIME_GUI_FOCUS_FILE_EXPLORER;
+        (void)ios_window_raise(
+            &state->shell.desktop.window_manager, state->file_explorer_native_window
+        );
+    }
     local.x -= IOS_RUNTIME_EXPLORER_X;
     local.y -= IOS_RUNTIME_EXPLORER_Y;
     if (IOS_SUCCEEDED(ios_file_explorer_window_handle_input(
             &state->file_explorer_window, &local, &activated, &activated_handle))) {
         (void)activated;
         (void)activated_handle;
-        (void)ios_file_explorer_window_render(&state->file_explorer_window);
-        (void)ios_window_invalidate(
-            &state->shell.desktop.window_manager,
-            state->file_explorer_native_window,
-            (struct ios_graphics_rect){
-                0, 0, IOS_RUNTIME_EXPLORER_WIDTH, IOS_RUNTIME_EXPLORER_HEIGHT
-            }
+        repaint_file_explorer(state);
+    }
+}
+
+static void route_file_explorer_key(
+    struct ios_kernel_runtime_state *state, const struct ios_input_event *event
+)
+{
+    bool activated;
+    ios_u64 activated_handle;
+
+    if (!state->file_explorer_view_running
+        || state->gui_focus != IOS_RUNTIME_GUI_FOCUS_FILE_EXPLORER) return;
+    if (IOS_SUCCEEDED(ios_file_explorer_window_handle_input(
+            &state->file_explorer_window, event, &activated, &activated_handle))) {
+        (void)activated;
+        (void)activated_handle;
+        repaint_file_explorer(state);
+    }
+}
+
+static ios_status start_doc_viewer_view(struct ios_kernel_runtime_state *state)
+{
+    ios_status status;
+
+    if (state->doc_viewer_view_running) return IOS_OK;
+    if (!state->doc_viewer_ready || state->doc_viewer_process == NULL
+        || state->doc_type_capability == IOS_INVALID_TYPE_ICON_CAPABILITY
+        || state->shell.config.font == NULL || !state->shell.gui_running) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    status = ios_doc_viewer_initialize(
+        &state->doc_viewer,
+        state->doc_viewer_process,
+        &state->shell_service,
+        resolve_file_explorer_icon,
+        state,
+        IOS_VFS_ROOT_OBJECT_ID,
+        state->doc_type_capability,
+        (struct ios_graphics_surface){
+            doc_viewer_pixels,
+            IOS_RUNTIME_DOC_VIEWER_WIDTH,
+            IOS_RUNTIME_DOC_VIEWER_HEIGHT,
+            IOS_RUNTIME_DOC_VIEWER_WIDTH
+        },
+        state->shell.config.font
+    );
+    if (IOS_FAILED(status)) return status;
+    status = ios_doc_viewer_render(&state->doc_viewer);
+    if (IOS_FAILED(status)) {
+        ios_doc_viewer_disconnect(&state->doc_viewer);
+        return status;
+    }
+    status = ios_window_create(
+        &state->shell.desktop.window_manager,
+        state->doc_viewer.window.surface,
+        IOS_RUNTIME_DOC_VIEWER_X,
+        IOS_RUNTIME_DOC_VIEWER_Y,
+        (ios_u32)state->doc_viewer_process->process_id,
+        &state->doc_viewer_native_window
+    );
+    if (IOS_FAILED(status)) {
+        ios_doc_viewer_disconnect(&state->doc_viewer);
+        return status;
+    }
+    state->doc_viewer_view_running = true;
+    state->gui_focus = IOS_RUNTIME_GUI_FOCUS_DOC_VIEWER;
+    return IOS_OK;
+}
+
+static void repaint_doc_viewer(struct ios_kernel_runtime_state *state)
+{
+    (void)ios_doc_viewer_render(&state->doc_viewer);
+    (void)ios_window_invalidate(
+        &state->shell.desktop.window_manager,
+        state->doc_viewer_native_window,
+        (struct ios_graphics_rect){
+            0, 0, IOS_RUNTIME_DOC_VIEWER_WIDTH, IOS_RUNTIME_DOC_VIEWER_HEIGHT
+        }
+    );
+}
+
+static void route_doc_viewer_pointer(
+    struct ios_kernel_runtime_state *state, const struct ios_input_event *event
+)
+{
+    struct ios_input_event local = *event;
+    bool activated;
+    ios_u64 activated_handle;
+
+    if (!state->doc_viewer_view_running
+        || event->x < IOS_RUNTIME_DOC_VIEWER_X
+        || event->y < IOS_RUNTIME_DOC_VIEWER_Y
+        || event->x >= IOS_RUNTIME_DOC_VIEWER_X + IOS_RUNTIME_DOC_VIEWER_WIDTH
+        || event->y >= IOS_RUNTIME_DOC_VIEWER_Y + IOS_RUNTIME_DOC_VIEWER_HEIGHT) return;
+    if ((event->flags & IOS_INPUT_PRESSED) != 0) {
+        state->gui_focus = IOS_RUNTIME_GUI_FOCUS_DOC_VIEWER;
+        (void)ios_window_raise(
+            &state->shell.desktop.window_manager, state->doc_viewer_native_window
         );
+    }
+    local.x -= IOS_RUNTIME_DOC_VIEWER_X;
+    local.y -= IOS_RUNTIME_DOC_VIEWER_Y;
+    if (IOS_SUCCEEDED(ios_doc_viewer_handle_input(
+            &state->doc_viewer, &local, &activated, &activated_handle))) {
+        (void)activated;
+        (void)activated_handle;
+        repaint_doc_viewer(state);
+    }
+}
+
+static void route_doc_viewer_key(
+    struct ios_kernel_runtime_state *state, const struct ios_input_event *event
+)
+{
+    bool activated;
+    ios_u64 activated_handle;
+
+    if (!state->doc_viewer_view_running
+        || state->gui_focus != IOS_RUNTIME_GUI_FOCUS_DOC_VIEWER) return;
+    if (IOS_SUCCEEDED(ios_doc_viewer_handle_input(
+            &state->doc_viewer, event, &activated, &activated_handle))) {
+        (void)activated;
+        (void)activated_handle;
+        repaint_doc_viewer(state);
+    }
+}
+
+static ios_status start_txt_viewer_view(struct ios_kernel_runtime_state *state)
+{
+    ios_status status;
+
+    if (state->txt_viewer_view_running) return IOS_OK;
+    if (!state->txt_viewer_ready || state->txt_viewer_process == NULL
+        || state->txt_type_capability == IOS_INVALID_TYPE_ICON_CAPABILITY
+        || state->shell.config.font == NULL || !state->shell.gui_running) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    status = ios_txt_viewer_initialize(
+        &state->txt_viewer,
+        state->txt_viewer_process,
+        &state->shell_service,
+        resolve_file_explorer_icon,
+        state,
+        IOS_VFS_ROOT_OBJECT_ID,
+        state->txt_type_capability,
+        (struct ios_graphics_surface){
+            txt_viewer_pixels,
+            IOS_RUNTIME_TXT_VIEWER_WIDTH,
+            IOS_RUNTIME_TXT_VIEWER_HEIGHT,
+            IOS_RUNTIME_TXT_VIEWER_WIDTH
+        },
+        state->shell.config.font
+    );
+    if (IOS_FAILED(status)) return status;
+    status = ios_txt_viewer_render(&state->txt_viewer);
+    if (IOS_FAILED(status)) {
+        ios_txt_viewer_disconnect(&state->txt_viewer);
+        return status;
+    }
+    status = ios_window_create(
+        &state->shell.desktop.window_manager,
+        state->txt_viewer.window.surface,
+        IOS_RUNTIME_TXT_VIEWER_X,
+        IOS_RUNTIME_TXT_VIEWER_Y,
+        (ios_u32)state->txt_viewer_process->process_id,
+        &state->txt_viewer_native_window
+    );
+    if (IOS_FAILED(status)) {
+        ios_txt_viewer_disconnect(&state->txt_viewer);
+        return status;
+    }
+    state->txt_viewer_view_running = true;
+    state->gui_focus = IOS_RUNTIME_GUI_FOCUS_TXT_VIEWER;
+    return IOS_OK;
+}
+
+static void repaint_txt_viewer(struct ios_kernel_runtime_state *state)
+{
+    (void)ios_txt_viewer_render(&state->txt_viewer);
+    (void)ios_window_invalidate(
+        &state->shell.desktop.window_manager,
+        state->txt_viewer_native_window,
+        (struct ios_graphics_rect){
+            0, 0, IOS_RUNTIME_TXT_VIEWER_WIDTH, IOS_RUNTIME_TXT_VIEWER_HEIGHT
+        }
+    );
+}
+
+static void route_txt_viewer_pointer(
+    struct ios_kernel_runtime_state *state, const struct ios_input_event *event
+)
+{
+    struct ios_input_event local = *event;
+    bool activated;
+    ios_u64 activated_handle;
+
+    if (!state->txt_viewer_view_running
+        || event->x < IOS_RUNTIME_TXT_VIEWER_X
+        || event->y < IOS_RUNTIME_TXT_VIEWER_Y
+        || event->x >= IOS_RUNTIME_TXT_VIEWER_X + IOS_RUNTIME_TXT_VIEWER_WIDTH
+        || event->y >= IOS_RUNTIME_TXT_VIEWER_Y + IOS_RUNTIME_TXT_VIEWER_HEIGHT) return;
+    if ((event->flags & IOS_INPUT_PRESSED) != 0) {
+        state->gui_focus = IOS_RUNTIME_GUI_FOCUS_TXT_VIEWER;
+        (void)ios_window_raise(
+            &state->shell.desktop.window_manager, state->txt_viewer_native_window
+        );
+    }
+    local.x -= IOS_RUNTIME_TXT_VIEWER_X;
+    local.y -= IOS_RUNTIME_TXT_VIEWER_Y;
+    if (IOS_SUCCEEDED(ios_txt_viewer_handle_input(
+            &state->txt_viewer, &local, &activated, &activated_handle))) {
+        (void)activated;
+        (void)activated_handle;
+        repaint_txt_viewer(state);
+    }
+}
+
+static void route_txt_viewer_key(
+    struct ios_kernel_runtime_state *state, const struct ios_input_event *event
+)
+{
+    bool activated;
+    ios_u64 activated_handle;
+
+    if (!state->txt_viewer_view_running
+        || state->gui_focus != IOS_RUNTIME_GUI_FOCUS_TXT_VIEWER) return;
+    if (IOS_SUCCEEDED(ios_txt_viewer_handle_input(
+            &state->txt_viewer, event, &activated, &activated_handle))) {
+        (void)activated;
+        (void)activated_handle;
+        repaint_txt_viewer(state);
     }
 }
 
 static void return_from_gui_to_cui(struct ios_kernel_runtime_state *state)
 {
+    if (state->doc_viewer_view_running) {
+        ios_doc_viewer_disconnect(&state->doc_viewer);
+        state->doc_viewer_view_running = false;
+    }
+    if (state->txt_viewer_view_running) {
+        ios_txt_viewer_disconnect(&state->txt_viewer);
+        state->txt_viewer_view_running = false;
+    }
     ios_shell_stop_gui(&state->shell, "gui_stopped: user request");
     state->file_explorer_view_running = false;
+    state->gui_focus = IOS_RUNTIME_GUI_FOCUS_NONE;
     if (state->framebuffer_cui.active) {
         (void)ios_graphics_text_console_clear(&state->framebuffer_cui);
     }
@@ -1204,20 +1501,21 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
     static const struct {
         ios_u64 identity;
         enum ios_presentation_icon icon;
+        ios_u64 viewer_application_identity;
     } file_type_icons[] = {
-        { UINT64_C(0x545854), IOS_ICON_TEXT },        /* TXT */
-        { UINT64_C(0x444f43), IOS_ICON_TEXT },        /* DOC */
-        { UINT64_C(0x4c4f47), IOS_ICON_TEXT },        /* LOG */
-        { UINT64_C(0x4d44), IOS_ICON_TEXT },          /* MD */
-        { UINT64_C(0x435356), IOS_ICON_TEXT },        /* CSV */
-        { UINT64_C(0x504e47), IOS_ICON_IMAGE },       /* PNG */
-        { UINT64_C(0x4a5047), IOS_ICON_IMAGE },       /* JPG */
-        { UINT64_C(0x424d50), IOS_ICON_IMAGE },       /* BMP */
-        { UINT64_C(0x474946), IOS_ICON_IMAGE },       /* GIF */
-        { UINT64_C(0x49434f), IOS_ICON_IMAGE },       /* ICO */
-        { UINT64_C(0x415050), IOS_ICON_APPLICATION }, /* APP */
-        { UINT64_C(0x455845), IOS_ICON_APPLICATION }, /* EXE */
-        { UINT64_C(0x42494e), IOS_ICON_APPLICATION }  /* BIN */
+        { UINT64_C(0x545854), IOS_ICON_TEXT, IOS_TXT_VIEWER_APPLICATION_ID },
+        { UINT64_C(0x444f43), IOS_ICON_TEXT, IOS_DOC_VIEWER_APPLICATION_ID },
+        { UINT64_C(0x4c4f47), IOS_ICON_TEXT, 0 },
+        { UINT64_C(0x4d44), IOS_ICON_TEXT, 0 },
+        { UINT64_C(0x435356), IOS_ICON_TEXT, 0 },
+        { UINT64_C(0x504e47), IOS_ICON_IMAGE, 0 },
+        { UINT64_C(0x4a5047), IOS_ICON_IMAGE, 0 },
+        { UINT64_C(0x424d50), IOS_ICON_IMAGE, 0 },
+        { UINT64_C(0x474946), IOS_ICON_IMAGE, 0 },
+        { UINT64_C(0x49434f), IOS_ICON_IMAGE, 0 },
+        { UINT64_C(0x415050), IOS_ICON_APPLICATION, 0 },
+        { UINT64_C(0x455845), IOS_ICON_APPLICATION, 0 },
+        { UINT64_C(0x42494e), IOS_ICON_APPLICATION, 0 }
     };
     struct ios_kernel_runtime_state *state = &runtime_state;
     ios_type_icon_capability ignored_capability;
@@ -1383,6 +1681,14 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
             &ignored_capability
         );
         if (IOS_FAILED(status)) return status;
+        if (file_type_icons[index].viewer_application_identity
+            == IOS_DOC_VIEWER_APPLICATION_ID) {
+            state->doc_type_capability = ignored_capability;
+        }
+        if (file_type_icons[index].viewer_application_identity
+            == IOS_TXT_VIEWER_APPLICATION_ID) {
+            state->txt_type_capability = ignored_capability;
+        }
     }
     ios_application_bindings_initialize(&state->bindings);
     status = ios_type_capability_service_initialize(
@@ -1399,8 +1705,6 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         .boot_info = boot_info,
         .shadow = { shadow_pixels, IOS_RUNTIME_FRAMEBUFFER_WIDTH,
                     IOS_RUNTIME_FRAMEBUFFER_HEIGHT, IOS_RUNTIME_FRAMEBUFFER_WIDTH },
-        .terminal_surface = { terminal_pixels, IOS_RUNTIME_TERMINAL_WIDTH,
-                              IOS_RUNTIME_TERMINAL_HEIGHT, IOS_RUNTIME_TERMINAL_WIDTH },
         .font = runtime_font,
         .cui_write = runtime_write,
         .cui_write_context = state,
@@ -1409,7 +1713,8 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
         .stop_module = shell_stop_module,
         .module_context = state,
         .desktop_module_available = role_is_available(state, IOS_MODULE_ROLE_GUI_DESKTOP),
-        .terminal_module_available = role_is_available(state, IOS_MODULE_ROLE_GUI_TERMINAL)
+        .terminal_module_available = role_is_available(state, IOS_MODULE_ROLE_GUI_TERMINAL),
+        .launch_terminal = false
     });
     if (IOS_FAILED(status)) return status;
     serial_write_line("INFERENCEOS:RUNTIME_STAGE cui-commands");
@@ -1458,17 +1763,23 @@ void ios_kernel_runtime_step(void)
                 return_from_gui_to_cui(state);
                 continue;
             }
-            if (event.type == IOS_INPUT_EVENT_KEY) {
+            if (event.type == IOS_INPUT_EVENT_KEY && state->shell.terminal.active) {
                 status = ios_terminal_feed_event(&state->shell.terminal, &event);
                 if (IOS_FAILED(status)) {
                     ios_shell_stop_gui(&state->shell, "gui_unavailable: input");
                 }
+            } else if (event.type == IOS_INPUT_EVENT_KEY) {
+                route_file_explorer_key(state, &event);
+                route_doc_viewer_key(state, &event);
+                route_txt_viewer_key(state, &event);
             } else if (event.type == IOS_INPUT_EVENT_POINTER_MOVE) {
                 ios_window_set_pointer(
                     &state->shell.desktop.window_manager, event.x, event.y, true
                 );
             } else if (event.type == IOS_INPUT_EVENT_POINTER_BUTTON) {
                 route_file_explorer_pointer(state, &event);
+                route_doc_viewer_pointer(state, &event);
+                route_txt_viewer_pointer(state, &event);
             }
         } else if (event.type == IOS_INPUT_EVENT_KEY
                    && (event.flags & IOS_INPUT_PRESSED) != 0) {
@@ -1481,10 +1792,31 @@ void ios_kernel_runtime_step(void)
             }
         }
     }
-    if (!state->shell.gui_running) state->file_explorer_view_running = false;
+    if (!state->shell.gui_running) {
+        state->file_explorer_view_running = false;
+        state->gui_focus = IOS_RUNTIME_GUI_FOCUS_NONE;
+        if (state->doc_viewer_view_running) {
+            ios_doc_viewer_disconnect(&state->doc_viewer);
+            state->doc_viewer_view_running = false;
+        }
+        if (state->txt_viewer_view_running) {
+            ios_txt_viewer_disconnect(&state->txt_viewer);
+            state->txt_viewer_view_running = false;
+        }
+    }
     if (state->shell.gui_running && !state->file_explorer_view_running
         && IOS_FAILED(start_file_explorer_view(state))) {
         ios_shell_stop_gui(&state->shell, "gui_unavailable: file explorer");
+    }
+    if (state->shell.gui_running && state->doc_viewer_ready
+        && !state->doc_viewer_view_running
+        && IOS_FAILED(start_doc_viewer_view(state))) {
+        state->doc_viewer_ready = false;
+    }
+    if (state->shell.gui_running && state->txt_viewer_ready
+        && !state->txt_viewer_view_running
+        && IOS_FAILED(start_txt_viewer_view(state))) {
+        state->txt_viewer_ready = false;
     }
     if (state->shell.gui_running
         && IOS_FAILED(ios_desktop_repaint(&state->shell.desktop))) {

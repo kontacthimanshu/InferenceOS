@@ -13,7 +13,8 @@ encryption, access control, or a security guarantee.
 
 ## Demonstrated scope
 
-- CUI and GUI views over the same VFS namespace, including a GUI terminal and File Explorer.
+- CUI and GUI views over the same VFS namespace, including File Explorer and filtered type viewers;
+  the command prompt remains in the standalone CUI rather than opening automatically in GUI mode.
 - A distinct InferenceOS-FS volume with a sparse 64 GiB reference disk, durable save ordering,
   metadata validation, and reboot-persistence workflows.
 - Shell-mediated, opaque application file services that do not expose raw extensions or hashes.

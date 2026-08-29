@@ -16,10 +16,35 @@ static ios_status validate_vfs_entry(const struct ios_vfs_directory_entry *entry
         || (entry->generic_attributes & ~IOS_VFS_ATTRIBUTE_READ_ONLY) != 0) {
         return IOS_ERROR(IOS_E_PROTOCOL);
     }
-    if (entry->kind == IOS_VFS_OBJECT_REGULAR_FILE && entry->internal_type_identity == 0) {
+    if (entry->kind == IOS_VFS_OBJECT_REGULAR_FILE
+        && (entry->internal_type_identity == 0 || entry->type_prefilter == 0)) {
         return IOS_ERROR(IOS_E_PROTOCOL);
     }
     return IOS_OK;
+}
+
+/*
+ * VFS type identities pack the one-to-three canonical extension bytes in
+ * big-endian order. TYPE_VIEW uses their FNV-1a fingerprint as a binary
+ * prefilter, then confirms the authoritative identity to reject collisions.
+ * Neither value crosses the application-facing display-safe boundary.
+ */
+static ios_u64 type_identity_prefilter(ios_u64 identity)
+{
+    ios_u8 bytes[sizeof(identity)];
+    ios_size first = 0;
+    ios_u32 hash = UINT32_C(0x811c9dc5);
+
+    for (ios_size index = 0; index < sizeof(bytes); ++index) {
+        const ios_size shift = (sizeof(bytes) - 1U - index) * 8U;
+        bytes[index] = (ios_u8)(identity >> shift);
+    }
+    while (first < sizeof(bytes) && bytes[first] == 0) ++first;
+    for (ios_size index = first; index < sizeof(bytes); ++index) {
+        hash ^= bytes[index];
+        hash *= UINT32_C(0x01000193);
+    }
+    return hash;
 }
 
 static ios_status make_safe_entry(
@@ -90,6 +115,7 @@ ios_status ios_file_view_dispatch(
     struct ios_vfs_directory_entry candidates[IOS_SHELL_FILE_VIEW_REPLY_CAPACITY];
     struct ios_vfs_mount *mount;
     ios_u64 requested_type = 0;
+    ios_u64 requested_prefilter = 0;
     ios_u64 next_continuation;
     ios_size candidate_count;
     ios_status status;
@@ -106,6 +132,7 @@ ios_status ios_file_view_dispatch(
             service->type_catalog, request->type_icon_capability, &requested_type
         );
         if (IOS_FAILED(status)) return status;
+        requested_prefilter = type_identity_prefilter(requested_type);
     }
     mount = vfs_root_mount(service->mount_registry);
     if (mount == NULL) return IOS_ERROR(IOS_E_NOT_FOUND);
@@ -119,8 +146,11 @@ ios_status ios_file_view_dispatch(
     for (ios_size index = 0; index < candidate_count; ++index) {
         status = validate_vfs_entry(&candidates[index]);
         if (IOS_FAILED(status)) return status;
-        if (operation != IOS_SHELL_DIRECTORY_VIEW
-            && candidates[index].internal_type_identity != requested_type) {
+        const bool directory = candidates[index].kind == IOS_VFS_OBJECT_DIRECTORY;
+        if ((operation == IOS_SHELL_SEARCH && directory)
+            || (!directory && operation != IOS_SHELL_DIRECTORY_VIEW
+                && (candidates[index].type_prefilter != requested_prefilter
+                    || candidates[index].internal_type_identity != requested_type))) {
             continue;
         }
         status = make_safe_entry(

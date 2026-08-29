@@ -39,7 +39,7 @@ known operation.
 | Operation | Value | Request contract |
 |---|---:|---|
 | `DIRECTORY_VIEW` | 1 | Opaque directory handle; type capability must be zero. |
-| `TYPE_VIEW` | 2 | Opaque directory handle and a valid opaque type capability. |
+| `TYPE_VIEW` | 2 | Opaque directory handle and a valid opaque type capability; returns navigable directories plus exact-type files. |
 | `SEARCH` | 3 | Same capability requirement as type view; results still require authoritative exact-type verification. |
 | `GUI_VIEW` | 4 | Opaque window/view handles and a strictly increasing render sequence. |
 
@@ -75,15 +75,22 @@ stable presentation labels such as `REPORT` and `REPORT (2)`; those labels do no
 underlying files. Companions cannot be represented as ordinary entries.
 
 Directory enumeration flows through Shell to the kernel file-view service and then VFS. Type and
-search operations may use internal hash information only as a prefilter; authoritative extension
-bytes must match before an object is returned. Registry-enabled and registry-disabled paths must
-produce equivalent correct visible results.
+search operations use a binary FNV-1a fingerprint only as a prefilter; the trusted service also
+requires the authoritative internal type identity to match before an object is returned. The
+binary fingerprint, identity, and extension bytes are never included in the application request or
+reply. Registry-enabled and registry-disabled paths must produce equivalent correct visible results.
 
 ## Type catalog and application bindings
 
 The kernel owns the mapping from internal file-type identities to presentation icons. The exposed
 type/icon value is an opaque boot-generation capability, not an extension or hash. Unknown mappings
 resolve to a generic-file icon.
+
+Storing the fingerprint as a binary integer is not considered encryption or a security boundary;
+reversible bitwise encoding would only be obfuscation. Confidentiality and authorization instead
+come from keeping both the fingerprint and authoritative identity in trusted code and exposing only
+the boot-scoped capability through the application ABI. An application's visible purpose or title
+can still identify the kind of view it presents.
 
 A separate trusted binding registry associates an immutable application identity with the internal
 types it is allowed to handle. Minting a process type capability requires both a valid catalog
@@ -95,11 +102,12 @@ binding registry.
 
 ## Proprietary application contract
 
-A supported proprietary application asks Shell for files using its trusted application identity
-and a kernel-minted type capability. Shell returns only authoritative exact-type matches as
-display-safe entries with read-only content handles and permitted generic metadata.
+A supported proprietary application asks Shell for its default explorer view using its trusted
+application identity and a kernel-minted type capability. Shell returns navigable directory
+entries and only authoritative exact-type regular-file matches, using display-safe metadata and
+read-only content handles.
 
-The reference proprietary test application verifies that each result:
+The reference proprietary test application verifies that each regular-file result:
 
 - is a version-1 regular-file DTO;
 - has an extension-free display name;
@@ -113,6 +121,17 @@ security label, filename, or proof of file content.
 
 The examples demonstrate the routing model. They do not claim that Microsoft Word, Excel, PDF, or
 other proprietary products or formats have been ported.
+
+The GUI `DOC Viewer` is a narrower built-in type-view client rather than a Word implementation. It
+holds only the opaque DOC presentation capability and opens a File Explorer view at the mounted
+root. Each `TYPE_VIEW` returns navigable folders and authoritative DOC matches, so double-click or
+Enter can descend into a folder and Backspace can return through display-safe history. It does not
+interpret document contents or expose DOC metadata to callers.
+
+The GUI `TXT Viewer` follows the same explorer contract for the authoritative TXT type. It holds
+only the opaque TXT presentation capability, starts at the mounted root, and renders folders plus
+extension-hidden TXT matches in a separate managed window. It never receives filename extensions,
+hashes, or non-TXT regular-file entries.
 
 ## Custom application and approved-adapter contract
 

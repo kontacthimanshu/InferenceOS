@@ -57,7 +57,9 @@ ios_status ios_shell_start_gui(struct ios_shell_runtime *runtime)
     ios_status status;
     if (runtime == NULL || !runtime->cui_usable) return IOS_ERROR(IOS_E_INVALID_STATE);
     if (runtime->gui_running) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
-    if (!runtime->config.desktop_module_available || !runtime->config.terminal_module_available) {
+    if (!runtime->config.desktop_module_available
+        || (runtime->config.launch_terminal
+            && !runtime->config.terminal_module_available)) {
         runtime->diagnostic = "gui_unavailable: required module";
         return IOS_ERROR(IOS_E_NOT_FOUND);
     }
@@ -81,20 +83,22 @@ ios_status ios_shell_start_gui(struct ios_shell_runtime *runtime)
         ios_shell_stop_gui(runtime, "gui_unavailable: desktop");
         return status;
     }
-    status = start_module(runtime, IOS_MODULE_ROLE_GUI_TERMINAL);
-    if (IOS_FAILED(status)) {
-        ios_shell_stop_gui(runtime, "gui_unavailable: terminal module");
-        return status;
-    }
-    runtime->terminal_module_started = true;
-    status = ios_terminal_start(
-        &runtime->terminal, &runtime->desktop.window_manager,
-        runtime->config.terminal_surface, runtime->config.font,
-        &runtime->commands, runtime->config.command_context, runtime, 32, 32
-    );
-    if (IOS_FAILED(status)) {
-        ios_shell_stop_gui(runtime, "gui_unavailable: terminal");
-        return status;
+    if (runtime->config.launch_terminal) {
+        status = start_module(runtime, IOS_MODULE_ROLE_GUI_TERMINAL);
+        if (IOS_FAILED(status)) {
+            ios_shell_stop_gui(runtime, "gui_unavailable: terminal module");
+            return status;
+        }
+        runtime->terminal_module_started = true;
+        status = ios_terminal_start(
+            &runtime->terminal, &runtime->desktop.window_manager,
+            runtime->config.terminal_surface, runtime->config.font,
+            &runtime->commands, runtime->config.command_context, runtime, 32, 32
+        );
+        if (IOS_FAILED(status)) {
+            ios_shell_stop_gui(runtime, "gui_unavailable: terminal");
+            return status;
+        }
     }
     runtime->gui_running = true;
     runtime->diagnostic = "gui_ready";

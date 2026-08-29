@@ -82,7 +82,7 @@ cmake --build --preset gcc-debug --target inferenceos-test-disk
 
 Outputs are created under `build/gcc-debug/artifacts/`:
 
-- the project-built `BOOTX64.EFI`, `kernel.elf`, and six static application ELFs;
+- the project-built `BOOTX64.EFI`, `kernel.elf`, and eight static application ELFs;
 - `inferenceos-esp.img`, a deterministic FAT32 ESP;
 - `inferenceos-persistent.raw`, a sparse 64 GiB logical disk;
 - target-generated version-1 `system_modules.json`, packaged modules, `modules.manifest`, and

@@ -116,6 +116,9 @@ VHDX. Also boot with only the boot VHDX; no format-capable disk should appear.
 - Keyboard uses the Hyper-V synthetic keyboard protocol and normalizes make/break, modifiers, and
   repeats into the existing input queue.
 - Pointer input uses SynthHID 2.0 and handles the standard Hyper-V five-byte absolute mouse report.
+  Its 15-bit (`0x7fff`) logical X/Y range is scaled across the complete framebuffer, and malformed
+  larger coordinates clamp to the screen edge. This keeps every desktop control, including the
+  top-right GUI close button, reachable.
 - Display remains the retained UEFI GOP framebuffer. The current qualified handoff is direct
   BGRX8888 at 1024x768. The standalone CUI now draws its prompt, input echo, command output,
   backspace, clear, wrapping, and scrolling directly to that framebuffer while preserving COM1 as

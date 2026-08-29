@@ -1,9 +1,9 @@
 # InferenceOS CUI
 
 The InferenceOS character user interface is the independent recovery, administration, and
-diagnostic surface for the demonstrator. The standalone console and the GUI terminal use the same
-parser, command registry, handlers, and command context, so a command has the same syntax and
-storage semantics in either interface. Both operate on the one mounted VFS namespace.
+diagnostic surface for the demonstrator. The standalone console owns command entry; an optional GUI
+terminal component can use the same parser, registry, handlers, and command context in explicit
+configurations, but it is not launched by the production GUI.
 
 The prompt is:
 
@@ -49,7 +49,7 @@ example, `fileinfo` alone reports `invalid_arguments` followed by `usage: filein
 | `help [command]` | List every registered command with its syntax, or show exact usage for one command. |
 | `version` | Print the demonstrator version. |
 | `clear` | Clear the active text console and return the cursor to the upper-left corner. |
-| `gui` | Start the graphical desktop and GUI terminal. It fails safely if required modules, the framebuffer, font, desktop, terminal, or composition are unavailable. |
+| `gui` | Start the graphical desktop without opening a command-prompt window. It fails safely if the required desktop module, framebuffer, font, or composition is unavailable. |
 
 `gui` does not replace the CUI. GUI startup failure leaves the standalone console usable, and GUI
 teardown restores CUI ownership and records a diagnostic reason.

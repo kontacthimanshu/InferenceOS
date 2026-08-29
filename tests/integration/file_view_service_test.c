@@ -7,9 +7,11 @@
 
 enum {
     TEXT_TYPE = UINT64_C(0x545854),
-    IMAGE_TYPE = UINT64_C(0x504e47),
-    COLLIDING_PREFILTER = UINT64_C(0x12345678)
+    IMAGE_TYPE = UINT64_C(0x504e47)
 };
+
+#define TEXT_PREFILTER UINT64_C(0xe771f04f)
+#define IMAGE_PREFILTER UINT64_C(0xaceadefc)
 
 struct fake_directory {
     struct ios_vfs_directory_entry entries[4];
@@ -20,13 +22,14 @@ static struct ios_vfs_directory_entry make_entry(
     const char *name,
     ios_u64 identity,
     ios_u64 type_identity,
+    ios_u64 type_prefilter,
     enum ios_vfs_object_kind kind
 )
 {
     struct ios_vfs_directory_entry entry = {
         .object_identity = identity,
         .internal_type_identity = type_identity,
-        .type_prefilter = kind == IOS_VFS_OBJECT_REGULAR_FILE ? COLLIDING_PREFILTER : 0,
+        .type_prefilter = kind == IOS_VFS_OBJECT_REGULAR_FILE ? type_prefilter : 0,
         .byte_size = kind == IOS_VFS_OBJECT_REGULAR_FILE ? 64 : 0,
         .allowed_operations = kind == IOS_VFS_OBJECT_DIRECTORY
             ? IOS_VFS_FILE_ENUMERATE : IOS_VFS_FILE_OPEN,
@@ -74,10 +77,10 @@ static void initialize_stack(
 {
     ios_type_icon_capability generic_capability;
     *directory = (struct fake_directory){ .entries = {
-        make_entry("REPORT", 7, TEXT_TYPE, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("CHART", 9, IMAGE_TYPE, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("NOTES", 11, TEXT_TYPE, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("DOCS", 13, 0, IOS_VFS_OBJECT_DIRECTORY)
+        make_entry("REPORT", 7, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+        make_entry("CHART", 9, IMAGE_TYPE, IMAGE_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+        make_entry("NOTES", 11, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+        make_entry("DOCS", 13, 0, 0, IOS_VFS_OBJECT_DIRECTORY)
     } };
     *device = (struct ios_block_device){ 0 };
     *root = (struct ios_vfs_object){ IOS_VFS_ROOT_OBJECT_ID, IOS_VFS_OBJECT_DIRECTORY, 0 };
@@ -158,7 +161,7 @@ static void test_directory_view_returns_bounded_display_safe_entries(void)
     }
 }
 
-static void test_type_and_search_verify_exact_identity_after_colliding_prefilter(void)
+static void test_type_and_search_use_binary_hash_then_verify_exact_identity(void)
 {
     struct fake_directory directory;
     struct ios_block_device device;
@@ -176,9 +179,29 @@ static void test_type_and_search_verify_exact_identity_after_colliding_prefilter
     );
     IOS_TEST_ASSERT_STATUS(
         dispatch(&service, IOS_SHELL_TYPE_VIEW, text_capability, 0, 4, &reply), IOS_OK);
-    IOS_TEST_ASSERT(reply.item_count == 2);
+    IOS_TEST_ASSERT(reply.item_count == 3);
     IOS_TEST_ASSERT(strcmp(reply.entries[0].display_name, "REPORT") == 0);
     IOS_TEST_ASSERT(strcmp(reply.entries[1].display_name, "NOTES") == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[2].display_name, "DOCS") == 0);
+    IOS_TEST_ASSERT(reply.entries[2].object_kind == IOS_DISPLAY_SAFE_DIRECTORY);
+
+    directory.entries[0].type_prefilter = IMAGE_PREFILTER;
+    IOS_TEST_ASSERT_STATUS(
+        dispatch(&service, IOS_SHELL_TYPE_VIEW, text_capability, 0, 4, &reply), IOS_OK);
+    IOS_TEST_ASSERT(reply.item_count == 2);
+    IOS_TEST_ASSERT(strcmp(reply.entries[0].display_name, "NOTES") == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[1].display_name, "DOCS") == 0);
+
+    directory.entries[0].type_prefilter = TEXT_PREFILTER;
+    directory.entries[1].type_prefilter = TEXT_PREFILTER;
+    IOS_TEST_ASSERT_STATUS(
+        dispatch(&service, IOS_SHELL_TYPE_VIEW, text_capability, 0, 4, &reply), IOS_OK);
+    IOS_TEST_ASSERT(reply.item_count == 3);
+    IOS_TEST_ASSERT(strcmp(reply.entries[0].display_name, "REPORT") == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[1].display_name, "NOTES") == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[2].display_name, "DOCS") == 0);
+
+    directory.entries[1].type_prefilter = IMAGE_PREFILTER;
     IOS_TEST_ASSERT_STATUS(
         dispatch(&service, IOS_SHELL_SEARCH, image_capability, 0, 4, &reply), IOS_OK);
     IOS_TEST_ASSERT(reply.item_count == 1);
@@ -209,7 +232,9 @@ static void test_pagination_and_forged_type_capability_are_bounded(void)
             &service, IOS_SHELL_TYPE_VIEW, text_capability,
             reply.continuation, 2, &reply
         ), IOS_OK);
-    IOS_TEST_ASSERT(reply.item_count == 1 && reply.continuation == 0);
+    IOS_TEST_ASSERT(reply.item_count == 2 && reply.continuation == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[0].display_name, "NOTES") == 0);
+    IOS_TEST_ASSERT(strcmp(reply.entries[1].display_name, "DOCS") == 0);
     const ios_size calls_before_forgery = directory.calls;
     IOS_TEST_ASSERT_STATUS(
         dispatch(&service, IOS_SHELL_SEARCH, UINT64_C(0xdeadbeef), 0, 4, &reply),
@@ -248,7 +273,7 @@ static void test_unmapped_files_receive_nonzero_generic_icon_capability(void)
 
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_directory_view_returns_bounded_display_safe_entries),
-    IOS_TEST_CASE(test_type_and_search_verify_exact_identity_after_colliding_prefilter),
+    IOS_TEST_CASE(test_type_and_search_use_binary_hash_then_verify_exact_identity),
     IOS_TEST_CASE(test_pagination_and_forged_type_capability_are_bounded),
     IOS_TEST_CASE(test_unmapped_files_receive_nonzero_generic_icon_capability)
 };

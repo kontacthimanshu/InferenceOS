@@ -101,8 +101,7 @@ ios_status ios_desktop_handle_input(
     }
     if (event->type == IOS_INPUT_EVENT_KEY
         && event->code == IOS_KEY_ESCAPE
-        && (event->flags & (IOS_INPUT_PRESSED | IOS_INPUT_CONTROL | IOS_INPUT_ALT))
-            == (IOS_INPUT_PRESSED | IOS_INPUT_CONTROL | IOS_INPUT_ALT)) {
+        && (event->flags & IOS_INPUT_PRESSED) != 0) {
         *close_requested = true;
         return IOS_OK;
     }

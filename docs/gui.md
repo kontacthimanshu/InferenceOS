@@ -12,9 +12,9 @@ The framebuffer abstraction preserves the firmware-provided stride. Client surfa
 buffer use 32-bit pixels; rendering is clipped before it reaches the target.
 
 ```text
-Desktop / GUI terminal / File Explorer
-                  |
-          application models
+Desktop / File Explorer / filtered viewers
+                    |
+            application models
                   |
       retained window manager
                   |
@@ -82,9 +82,9 @@ The compositor:
 - copies only the dirty area from shadow memory to the GOP framebuffer.
 
 The desktop reserves a red `X` button in the top-right corner. Clicking it
-closes GUI mode, stops the GUI terminal and desktop modules, clears the
-framebuffer, and restores a fresh CUI prompt. `Ctrl+Alt+Escape` provides the
-same transition when pointer input is unavailable.
+closes GUI mode and its managed windows, stops the desktop module, clears the framebuffer, and
+restores a fresh CUI prompt. Pressing `Escape` provides the same transition when pointer input is
+unavailable.
 
 Rendering a window through the Shell GUI-view service additionally validates that the window and
 view handles belong to the calling process and application, require the expected rights, refer to
@@ -92,30 +92,30 @@ the same target, and use a strictly increasing render sequence.
 
 ## Desktop and GUI lifecycle
 
-The `gui` command asks the Shell runtime to start the desktop and terminal modules in order:
+The `gui` command asks the Shell runtime to start the graphical desktop:
 
 1. confirm the CUI is usable and no GUI is already running;
-2. confirm the desktop and terminal modules are available;
+2. confirm the desktop module is available;
 3. open and validate the GOP framebuffer;
 4. validate the alpha4 console font;
 5. start the desktop module and window manager;
-6. start the terminal module and its window; and
-7. compose the first frame and report GUI ready.
+6. start the managed File Explorer and filtered viewer windows; and
+7. compose the frame and report GUI ready.
 
-Failure unwinds any modules and windows already started. Teardown destroys the terminal window,
-stops terminal and desktop modules in reverse order, hides the pointer, and returns input/control to
-the independently usable CUI. The current diagnostic distinguishes missing modules, framebuffer,
-font, desktop, terminal, and composition failures.
+Failure unwinds any modules and windows already started. Teardown destroys the managed windows,
+stops the desktop module, hides the pointer, and returns input/control to the independently usable
+CUI. The current diagnostic distinguishes missing modules, framebuffer, font, desktop, and
+composition failures.
 
-## GUI terminal
+## Optional GUI terminal
 
-The terminal is a client surface inside a managed window. It uses the same command registry,
-parser, handlers, and command context as the standalone console. Printable key-press events feed the
-shared CUI console; non-key and key-release events are ignored. Text wraps to the next row, scrolls
-by one font row at the bottom, and supports the console's clear sequence.
+The terminal component remains available for explicit configurations and tests, but the production
+GUI does not launch it automatically. GUI mode therefore opens without a command-prompt window.
+When explicitly enabled, the terminal is a managed client surface using the same command registry,
+parser, handlers, and command context as the standalone console.
 
-Consequently, the GUI terminal and standalone CUI have the same path, storage, diagnostic, and
-durability semantics. They are two presentations of one command engine, not separate shells.
+The standalone CUI remains the recovery and administration surface before GUI startup and after GUI
+shutdown.
 
 ## File Explorer
 
@@ -142,15 +142,44 @@ generic page icon. File Explorer never derives a type by parsing a hidden extens
 
 ### Input behavior
 
-- Left-click selects the icon under the pointer.
+- Left-click selects the icon under the pointer; double-click activates it and opens a directory.
 - Left and Right move between icons; Up and Down move between grid rows and scroll as needed.
-- Enter activates the selection; a directory with enumerate rights becomes the new view.
+- When File Explorer has focus, Enter activates the selection; a directory with enumerate rights
+  becomes the new view and its files are rendered.
 - Backspace navigates to the previous opaque directory handle.
 - In the privileged diagnostic inspector, Left/Right changes pages and Escape closes it.
 
 Properties and ordinary rendering remain display-safe even when the diagnostic inspector is
 available. Opening the inspector is a distinct authorized action and does not widen the ordinary
 DTO or application contract.
+
+## DOC Viewer application
+
+GUI mode also starts the optional `DOC Viewer` ring-3 application. Its managed window is titled
+`DOC Files App` and occupies the lower-right desktop region below File Explorer. The application asks
+Shell for a paged `TYPE_VIEW` of the mounted root using the boot-generation opaque capability for
+the authoritative DOC type. It never parses names or receives `.DOC`, extension bytes, or hashes.
+The window opens as a File Explorer view and its header displays the current display-safe folder,
+starting with `Folder: /`.
+
+The returned model contains every navigable folder plus regular DOC files; regular files of other
+types remain hidden. It supports selection, arrow-key scrolling, double-click or Enter to open a
+folder, and Backspace to return. When no root filesystem is mounted, the application remains
+available with an empty view rather than preventing GUI startup. The module is packaged separately
+as `doc-viewer.elf` with application identity 4103.
+
+## TXT Viewer application
+
+GUI mode also starts the optional `TXT Viewer` ring-3 application. Its managed window is titled
+`TXT Files App` and occupies the left desktop region. It requests a paged
+`TYPE_VIEW` of the mounted root using only the boot-generation opaque capability for the
+authoritative TXT type. Its File Explorer view starts at `Folder: /` and updates the display-safe
+current-folder label during navigation.
+
+The returned grid contains every navigable folder plus regular TXT files, with other regular-file
+types hidden. It supports the same selection, scrolling, double-click/Enter navigation, and
+Backspace history as File Explorer. A missing root mount produces an empty view without preventing
+GUI startup. The module is packaged separately as `txt-viewer.elf` with application identity 4104.
 
 ## Shell and storage boundaries
 
@@ -162,9 +191,12 @@ or communicate with block devices.
 
 For an InferenceOS-FS mount, the filesystem driver follows the validated FAT directory chain,
 decodes healthy directory records, suppresses internal companion records, and supplies an internal
-type identity to VFS. The kernel converts that identity to an opaque icon capability before the
-entry crosses the Shell boundary. Thus the program reflects the FAT-backed namespace without
-receiving raw FAT values, cluster locations, extensions, or hashes.
+type identity and binary FNV-1a prefilter to VFS. For regular files in a `TYPE_VIEW`, the kernel
+first compares the binary prefilter and then confirms the authoritative identity, preventing a hash
+collision from returning the wrong type. Directories remain visible for navigation but carry no
+file-type identity. The kernel converts file identities to opaque boot-scoped capabilities before
+entries cross the Shell boundary. Thus the program reflects the FAT-backed namespace without
+receiving raw FAT values, cluster locations, extensions, fingerprints, or hashes.
 
 The complete application-facing schema and authorization rules are in
 [application contracts](applications.md). The on-disk and extension-hiding rules are in

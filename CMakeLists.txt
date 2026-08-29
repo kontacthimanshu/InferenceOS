@@ -359,6 +359,38 @@ target_link_libraries(
 inferenceos_configure_freestanding_target(inferenceos_file_explorer)
 
 add_library(
+    inferenceos_doc_viewer
+    STATIC
+        src/applications/doc_viewer/main.c
+)
+add_library(InferenceOS::DocViewer ALIAS inferenceos_doc_viewer)
+target_include_directories(
+    inferenceos_doc_viewer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/applications/doc_viewer/include"
+)
+target_link_libraries(
+    inferenceos_doc_viewer
+    PUBLIC InferenceOS::FileExplorer
+)
+inferenceos_configure_freestanding_target(inferenceos_doc_viewer)
+
+add_library(
+    inferenceos_txt_viewer
+    STATIC
+        src/applications/txt_viewer/main.c
+)
+add_library(InferenceOS::TxtViewer ALIAS inferenceos_txt_viewer)
+target_include_directories(
+    inferenceos_txt_viewer
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/applications/txt_viewer/include"
+)
+target_link_libraries(
+    inferenceos_txt_viewer
+    PUBLIC InferenceOS::FileExplorer
+)
+inferenceos_configure_freestanding_target(inferenceos_txt_viewer)
+
+add_library(
     inferenceos_cui
     STATIC
         src/cui/parser.c
@@ -914,6 +946,12 @@ if(CMAKE_CROSSCOMPILING)
     inferenceos_add_system_application(
         inferenceos_file_explorer_application file-explorer src/gui/file_explorer/user_entry.c)
     inferenceos_add_system_application(
+        inferenceos_doc_viewer_application doc-viewer
+        src/applications/doc_viewer/user_entry.c)
+    inferenceos_add_system_application(
+        inferenceos_txt_viewer_application txt-viewer
+        src/applications/txt_viewer/user_entry.c)
+    inferenceos_add_system_application(
         inferenceos_proprietary_test_application proprietary-test
         src/applications/proprietary_test/user_entry.c)
     inferenceos_add_system_application(
@@ -926,6 +964,8 @@ if(CMAKE_CROSSCOMPILING)
             inferenceos_gui_desktop_application
             inferenceos_gui_terminal_application
             inferenceos_file_explorer_application
+            inferenceos_doc_viewer_application
+            inferenceos_txt_viewer_application
             inferenceos_proprietary_test_application
             inferenceos_custom_test_application
     )
@@ -949,6 +989,7 @@ if(CMAKE_CROSSCOMPILING)
             InferenceOS::Boot
             InferenceOS::Block
             InferenceOS::CuiFilesystem
+            InferenceOS::DocViewer
             InferenceOS::FileExplorer
             InferenceOS::Filesystem
             InferenceOS::Input
@@ -962,6 +1003,7 @@ if(CMAKE_CROSSCOMPILING)
             InferenceOS::Serial
             InferenceOS::ShellRuntime
             InferenceOS::Syscall
+            InferenceOS::TxtViewer
             InferenceOS::Vfs
             InferenceOS::VirtioBlock
             InferenceOS::ArchX86_64
@@ -1020,7 +1062,9 @@ if(CMAKE_CROSSCOMPILING)
     { "application_identity": 4099, "role": "gui_terminal", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_gui_terminal_application", "source": "applications/gui-terminal.elf", "esp_path": "/InferenceOS/System/gui-terminal.elf" },
     { "application_identity": 4100, "role": "file_explorer", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_file_explorer_application", "source": "applications/file-explorer.elf", "esp_path": "/InferenceOS/System/file-explorer.elf" },
     { "application_identity": 4101, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_proprietary_test_application", "source": "applications/proprietary-test.elf", "esp_path": "/InferenceOS/System/proprietary-test.elf" },
-    { "application_identity": 4102, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_custom_test_application", "source": "applications/custom-test.elf", "esp_path": "/InferenceOS/System/custom-test.elf" }
+    { "application_identity": 4102, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_custom_test_application", "source": "applications/custom-test.elf", "esp_path": "/InferenceOS/System/custom-test.elf" },
+    { "application_identity": 4103, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_doc_viewer_application", "source": "applications/doc-viewer.elf", "esp_path": "/InferenceOS/System/doc-viewer.elf" },
+    { "application_identity": 4104, "role": "test_application", "required": false, "entry_abi_version": 1, "producer_target": "inferenceos_txt_viewer_application", "source": "applications/txt-viewer.elf", "esp_path": "/InferenceOS/System/txt-viewer.elf" }
   ],
   "assets": [
     { "kind": "alpha4_font", "source": "fonts/inferenceos-console-12x24.alpha4", "esp_path": "/InferenceOS/System/inferenceos-console-12x24.alpha4", "license": "OFL-1.1", "license_source": "assets/fonts/LICENSE.txt" }
@@ -1376,6 +1420,8 @@ if(TARGET inferenceos-system-applications)
         "${_inferenceos_application_directory}/gui-desktop.elf"
         "${_inferenceos_application_directory}/gui-terminal.elf"
         "${_inferenceos_application_directory}/file-explorer.elf"
+        "${_inferenceos_application_directory}/doc-viewer.elf"
+        "${_inferenceos_application_directory}/txt-viewer.elf"
         "${_inferenceos_application_directory}/proprietary-test.elf"
         "${_inferenceos_application_directory}/custom-test.elf"
     )
@@ -1400,6 +1446,8 @@ add_custom_command(
         "${_inferenceos_module_directory}/InferenceOS/System/gui-desktop.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/gui-terminal.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/file-explorer.elf"
+        "${_inferenceos_module_directory}/InferenceOS/System/doc-viewer.elf"
+        "${_inferenceos_module_directory}/InferenceOS/System/txt-viewer.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/proprietary-test.elf"
         "${_inferenceos_module_directory}/InferenceOS/System/custom-test.elf"
     COMMAND

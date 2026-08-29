@@ -17,6 +17,8 @@ function(inferenceos_add_host_test target)
             "${PROJECT_SOURCE_DIR}/src/gui/graphics/include"
             "${PROJECT_SOURCE_DIR}/src/gui/window/include"
             "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/include"
+            "${PROJECT_SOURCE_DIR}/src/applications/doc_viewer/include"
+            "${PROJECT_SOURCE_DIR}/src/applications/txt_viewer/include"
             "${PROJECT_SOURCE_DIR}/src/cui/include"
             "${PROJECT_SOURCE_DIR}/src/shell/include"
             "${PROJECT_SOURCE_DIR}/src/gui/desktop/include"
@@ -816,6 +818,56 @@ target_include_directories(
 add_test(NAME file-view-model-unit COMMAND inferenceos_file_view_model_test)
 set_tests_properties(
     file-view-model-unit PROPERTIES LABELS "host;unit;gui;file-explorer;metadata-hiding"
+)
+
+inferenceos_add_host_test(
+    inferenceos_doc_viewer_test
+    unit/doc_viewer_test.c
+    "${PROJECT_SOURCE_DIR}/src/applications/doc_viewer/main.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/model.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/view_provider.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/window.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/primitives.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/text.c"
+    "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/string.c"
+)
+target_include_directories(
+    inferenceos_doc_viewer_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+target_compile_options(inferenceos_doc_viewer_test PRIVATE -fno-builtin)
+add_test(NAME doc-viewer-unit COMMAND inferenceos_doc_viewer_test)
+set_tests_properties(
+    doc-viewer-unit
+    PROPERTIES LABELS "host;unit;gui;application;doc;file-view;metadata-hiding"
+)
+
+inferenceos_add_host_test(
+    inferenceos_txt_viewer_test
+    unit/txt_viewer_test.c
+    "${PROJECT_SOURCE_DIR}/src/applications/txt_viewer/main.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/model.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/view_provider.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/file_explorer/window.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/primitives.c"
+    "${PROJECT_SOURCE_DIR}/src/gui/graphics/text.c"
+    "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/memory.c"
+    "${PROJECT_SOURCE_DIR}/src/runtime/string.c"
+)
+target_include_directories(
+    inferenceos_txt_viewer_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+target_compile_options(inferenceos_txt_viewer_test PRIVATE -fno-builtin)
+add_test(NAME txt-viewer-unit COMMAND inferenceos_txt_viewer_test)
+set_tests_properties(
+    txt-viewer-unit
+    PROPERTIES LABELS "host;unit;gui;application;txt;file-view;metadata-hiding"
 )
 
 inferenceos_add_host_test(

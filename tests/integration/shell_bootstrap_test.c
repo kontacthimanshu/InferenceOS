@@ -119,8 +119,40 @@ static struct ios_shell_config make_config(
         .stop_module = stop_module,
         .module_context = observation,
         .desktop_module_available = true,
-        .terminal_module_available = true
+        .terminal_module_available = true,
+        .launch_terminal = true
     };
+}
+
+static void test_gui_starts_without_a_terminal_window_when_disabled(void)
+{
+    ios_u32 framebuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
+    ios_u32 shadow[SCREEN_WIDTH * SCREEN_HEIGHT];
+    ios_u32 terminal_pixels[TERMINAL_WIDTH * TERMINAL_HEIGHT];
+    ios_u8 font_data[FONT_DATA_SIZE];
+    struct ios_psf2_font font;
+    struct ios_boot_info boot_info;
+    struct test_observation observation = { 0 };
+    struct ios_shell_runtime shell;
+    struct ios_shell_config config;
+
+    make_font(font_data, &font);
+    config = make_config(
+        &boot_info, framebuffer, shadow, terminal_pixels, &font, &observation
+    );
+    config.launch_terminal = false;
+    config.terminal_module_available = false;
+    IOS_TEST_ASSERT_STATUS(ios_shell_bootstrap(&shell, &config), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(ios_shell_start_gui(&shell), IOS_OK);
+    IOS_TEST_ASSERT(shell.gui_running && shell.desktop.active);
+    IOS_TEST_ASSERT(!shell.terminal.active && !shell.terminal_module_started);
+    IOS_TEST_ASSERT(observation.start_count == 1);
+    IOS_TEST_ASSERT(*observation.starts == IOS_MODULE_ROLE_GUI_DESKTOP);
+
+    ios_shell_stop_gui(&shell, NULL);
+    IOS_TEST_ASSERT(!shell.gui_running && shell.cui_usable);
+    IOS_TEST_ASSERT(observation.stop_count == 1);
+    IOS_TEST_ASSERT(*observation.stops == IOS_MODULE_ROLE_GUI_DESKTOP);
 }
 
 static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
@@ -210,7 +242,7 @@ static void test_gui_command_starts_modules_and_terminal_shares_registry(void)
         .structure_size = sizeof(close_event),
         .structure_version = IOS_INPUT_EVENT_VERSION,
         .type = IOS_INPUT_EVENT_KEY,
-        .flags = IOS_INPUT_PRESSED | IOS_INPUT_CONTROL | IOS_INPUT_ALT,
+        .flags = IOS_INPUT_PRESSED,
         .code = IOS_KEY_ESCAPE
     };
     IOS_TEST_ASSERT_STATUS(
@@ -257,6 +289,7 @@ static void test_terminal_failure_unwinds_desktop_and_preserves_cui(void)
 }
 
 const struct ios_test_case ios_test_cases[] = {
+    IOS_TEST_CASE(test_gui_starts_without_a_terminal_window_when_disabled),
     IOS_TEST_CASE(test_gui_command_starts_modules_and_terminal_shares_registry),
     IOS_TEST_CASE(test_terminal_failure_unwinds_desktop_and_preserves_cui)
 };

@@ -19,8 +19,9 @@ enum ios_shell_operation {
 
 /*
  * DIRECTORY_VIEW requires directory_handle and zero type_icon_capability.
- * TYPE_VIEW and SEARCH require an opaque type_icon_capability. No ordinary
- * request carries an extension or extension hash.
+ * TYPE_VIEW and SEARCH require an opaque type_icon_capability. TYPE_VIEW
+ * includes navigable directories and exact-type files; SEARCH is file-only.
+ * No ordinary request carries an extension or extension hash.
  */
 struct ios_shell_file_view_request {
     ios_u16 size;

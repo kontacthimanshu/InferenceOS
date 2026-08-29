@@ -1,4 +1,5 @@
 #include <inferenceos/drivers/hyperv/input.h>
+#include <inferenceos/gui/desktop.h>
 #include <inferenceos/test.h>
 
 #include <string.h>
@@ -112,7 +113,7 @@ static void extended_arrows_and_absolute_mouse_reports_are_normalized(void)
     struct ios_hyperv_keyboard keyboard;
     struct ios_hyperv_mouse mouse;
     struct ios_input_event event;
-    const ios_u8 report[5] = {1, 0xff, 0xff, 0xff, 0xff};
+    const ios_u8 report[5] = {1, 0xff, 0x7f, 0xff, 0x7f};
 
     input_queue_initialize(&queue, 100, 80);
     memset(&keyboard, 0, sizeof(keyboard));
@@ -133,12 +134,60 @@ static void extended_arrows_and_absolute_mouse_reports_are_normalized(void)
     IOS_TEST_ASSERT(event.code == IOS_POINTER_BUTTON_LEFT);
 }
 
+static void out_of_range_absolute_mouse_reports_clamp_to_the_screen_edge(void)
+{
+    struct ios_input_queue queue;
+    struct ios_hyperv_mouse mouse = { 0 };
+    struct ios_input_event event;
+    const ios_u8 report[5] = {0, 0xff, 0xff, 0xff, 0xff};
+
+    input_queue_initialize(&queue, 1024, 768);
+    mouse.queue = &queue;
+    IOS_TEST_ASSERT_STATUS(
+        hyperv_mouse_handle_report(&mouse, report, sizeof(report), 1), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(input_queue_pop(&queue, &event), IOS_OK);
+    IOS_TEST_ASSERT(event.type == IOS_INPUT_EVENT_POINTER_MOVE);
+    IOS_TEST_ASSERT(event.x == 1023 && event.y == 767);
+}
+
+static void absolute_mouse_can_emit_a_click_inside_the_desktop_close_button(void)
+{
+    struct ios_input_queue queue;
+    struct ios_hyperv_mouse mouse = { 0 };
+    struct ios_input_event event;
+    const ios_u8 report[5] = {1, 0x20, 0x7d, 0xc0, 0x02};
+
+    input_queue_initialize(&queue, 1024, 768);
+    mouse.queue = &queue;
+    IOS_TEST_ASSERT_STATUS(
+        hyperv_mouse_handle_report(&mouse, report, sizeof(report), 1), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(input_queue_pop(&queue, &event), IOS_OK);
+    IOS_TEST_ASSERT(event.type == IOS_INPUT_EVENT_POINTER_MOVE);
+    IOS_TEST_ASSERT(event.x == 1000 && event.y == 16);
+    IOS_TEST_ASSERT_STATUS(input_queue_pop(&queue, &event), IOS_OK);
+    IOS_TEST_ASSERT(event.type == IOS_INPUT_EVENT_POINTER_BUTTON);
+    IOS_TEST_ASSERT(event.code == IOS_POINTER_BUTTON_LEFT);
+    IOS_TEST_ASSERT((event.flags & IOS_INPUT_PRESSED) != 0);
+    IOS_TEST_ASSERT(
+        event.x >= 1024 - IOS_DESKTOP_CLOSE_BUTTON_MARGIN - IOS_DESKTOP_CLOSE_BUTTON_SIZE
+        && event.x < 1024 - IOS_DESKTOP_CLOSE_BUTTON_MARGIN
+    );
+    IOS_TEST_ASSERT(
+        event.y >= IOS_DESKTOP_CLOSE_BUTTON_MARGIN
+        && event.y < IOS_DESKTOP_CLOSE_BUTTON_MARGIN + IOS_DESKTOP_CLOSE_BUTTON_SIZE
+    );
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(keyboard_protocol_uses_exact_wire_message_sizes),
     IOS_TEST_CASE(mouse_protocol_uses_pipe_envelope),
     IOS_TEST_CASE(keyboard_make_break_repeat_and_modifiers_are_normalized),
     IOS_TEST_CASE(keyboard_poll_accepts_vmbus_alignment_padding),
-    IOS_TEST_CASE(extended_arrows_and_absolute_mouse_reports_are_normalized)
+    IOS_TEST_CASE(extended_arrows_and_absolute_mouse_reports_are_normalized),
+    IOS_TEST_CASE(out_of_range_absolute_mouse_reports_clamp_to_the_screen_edge),
+    IOS_TEST_CASE(absolute_mouse_can_emit_a_click_inside_the_desktop_close_button)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

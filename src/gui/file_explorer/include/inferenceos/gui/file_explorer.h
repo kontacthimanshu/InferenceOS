@@ -14,7 +14,9 @@ enum {
     IOS_FILE_EXPLORER_HEADER_HEIGHT = 28,
     IOS_FILE_EXPLORER_CELL_WIDTH = 96,
     IOS_FILE_EXPLORER_CELL_HEIGHT = 92,
-    IOS_FILE_EXPLORER_ICON_SIZE = 32
+    IOS_FILE_EXPLORER_ICON_SIZE = 32,
+    IOS_FILE_EXPLORER_DOUBLE_CLICK_TICKS = 50,
+    IOS_FILE_EXPLORER_LOCATION_CAPACITY = IOS_DISPLAY_SAFE_NAME_CAPACITY + 9
 };
 
 enum ios_file_explorer_diagnostic_page {
@@ -95,10 +97,18 @@ struct ios_file_explorer_window {
     struct ios_file_explorer_model *model;
     struct ios_graphics_surface surface;
     const struct ios_psf2_font *font;
+    const char *title;
+    const char *location;
+    char location_storage[IOS_FILE_EXPLORER_LOCATION_CAPACITY];
+    char location_history[IOS_FILE_EXPLORER_HISTORY_CAPACITY]
+        [IOS_FILE_EXPLORER_LOCATION_CAPACITY];
     ios_u32 background_color;
     ios_u32 selection_color;
     ios_u32 foreground_color;
     ios_size first_visible_index;
+    ios_size last_click_index;
+    ios_u64 last_click_ticks;
+    bool has_pending_click;
 };
 
 struct ios_file_explorer_client {

@@ -21,6 +21,7 @@ struct ios_shell_config {
     void *module_context;
     bool desktop_module_available;
     bool terminal_module_available;
+    bool launch_terminal;
 };
 
 struct ios_shell_runtime {

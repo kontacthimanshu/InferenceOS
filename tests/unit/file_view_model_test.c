@@ -271,6 +271,60 @@ static void test_pointer_keyboard_navigation_and_rendering_use_safe_model(void)
     IOS_TEST_ASSERT(model.directory_handle == 1 && model.entry_count == 3);
 }
 
+static void test_double_click_and_enter_open_directories(void)
+{
+    struct fake_view_provider fake;
+    struct ios_file_explorer_model model;
+    ios_u32 pixels[320 * 220] = { 0 };
+    ios_u8 glyphs[128 * 16] = { 0 };
+    const struct ios_graphics_surface surface = { pixels, 320, 220, 320 };
+    const struct ios_psf2_font font = {
+        glyphs, sizeof(glyphs), 128, 16, 8, 16, IOS_RASTER_FONT_MONO1
+    };
+    struct ios_file_explorer_window window;
+    bool activated;
+    ios_u64 handle;
+    struct ios_input_event click = {
+        .type = IOS_INPUT_EVENT_POINTER_BUTTON,
+        .flags = IOS_INPUT_PRESSED,
+        .code = IOS_POINTER_BUTTON_LEFT,
+        .x = 2 * IOS_FILE_EXPLORER_CELL_WIDTH + 1,
+        .y = IOS_FILE_EXPLORER_HEADER_HEIGHT + 1,
+        .timestamp_ticks = 100
+    };
+    const struct ios_input_event enter = {
+        .type = IOS_INPUT_EVENT_KEY, .flags = IOS_INPUT_PRESSED, .code = IOS_KEY_ENTER
+    };
+    const struct ios_input_event back = {
+        .type = IOS_INPUT_EVENT_KEY, .flags = IOS_INPUT_PRESSED, .code = IOS_KEY_BACKSPACE
+    };
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_model_initialize(&model, make_fake_provider(&fake), 1), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_initialize(&window, &model, surface, &font), IOS_OK);
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &click, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(!activated && model.directory_handle == 1 && model.selected_index == 2);
+    click.timestamp_ticks += IOS_FILE_EXPLORER_DOUBLE_CLICK_TICKS;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &click, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(activated && handle == 11);
+    IOS_TEST_ASSERT(model.directory_handle == 11 && model.entry_count == 1);
+    IOS_TEST_ASSERT(strcmp(window.location, "Folder: DOCS") == 0);
+
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &back, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(window.location, "Folder: /") == 0);
+    IOS_TEST_ASSERT_STATUS(ios_file_explorer_model_select(&model, 2), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_explorer_window_handle_input(&window, &enter, &activated, &handle), IOS_OK);
+    IOS_TEST_ASSERT(activated && handle == 11);
+    IOS_TEST_ASSERT(model.directory_handle == 11 && model.entry_count == 1);
+    IOS_TEST_ASSERT(strcmp(window.location, "Folder: DOCS") == 0);
+}
+
 static void test_icon_grid_renders_all_presentations_and_scrolls_by_rows(void)
 {
     struct fake_view_provider fake;
@@ -415,6 +469,7 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_catalog_tokens_are_opaque_and_registration_is_stable),
     IOS_TEST_CASE(test_injected_provider_builds_safe_selectable_model_and_properties),
     IOS_TEST_CASE(test_pointer_keyboard_navigation_and_rendering_use_safe_model),
+    IOS_TEST_CASE(test_double_click_and_enter_open_directories),
     IOS_TEST_CASE(test_icon_grid_renders_all_presentations_and_scrolls_by_rows),
     IOS_TEST_CASE(test_controller_navigates_and_mutates_through_opaque_provider),
     IOS_TEST_CASE(test_controller_enforces_rights_and_preserves_view_on_provider_failure)

@@ -1,7 +1,7 @@
 # Disclaimer
 InferenceOS is an operating system philosophy which has its roots in two of the world'd most prominent operating system philosophies as far as file system is concerned, namely Microsoft Windows and Linux. There is no intention to infringe on intellectual property and/or copyrights, goodwill of these operating systems.
 
-# Readily Usable Hyper-V VM
+### Readily Usable Hyper-V VM
 Readily usable Hyper-V VM of this operating system is inside the folder:
 
 ./ReadilyUsableHyperV-VM

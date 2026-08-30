@@ -28,7 +28,6 @@ rules.ninja
 *.img
 *.raw
 *.qcow2
-*.vhdx
 *.map
 *.sym
 *.d

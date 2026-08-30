@@ -222,3 +222,16 @@ and release-claim disposition is recorded in
 [docs/validation/constitution-check.md](docs/validation/constitution-check.md).
 
 InferenceOS is licensed under the [MIT License](LICENSE).
+
+## Quick Virtual Machine Creation in Hyper-V
+
+Clone the repository.
+Open an elevated PowerShell window.
+Run from elevated PowerShell:
+
+  #### Set-Location C:\Users\konta\source\repos\InferenceOS
+
+  #### & .\tools\image\recreate_hyperv_vm.ps1 `
+      -Force `
+      -Confirm:$false `
+      -Start

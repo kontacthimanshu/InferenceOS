@@ -3,6 +3,7 @@ param(
     [string]$VmName = 'InferenceOS-HyperV',
     [string]$RepositoryRoot = (Join-Path $PSScriptRoot '../..'),
     [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$BuildPreset = 'gcc-debug',
+    [string]$WslToolEnvironmentFile,
     [ValidateRange(512MB, 16GB)][uint64]$MemoryStartupBytes = 1GB,
     [ValidateRange(50000000000, [uint64]::MaxValue)][uint64]$DataDiskSizeBytes = 64GB,
     [switch]$PreserveDataDisk,
@@ -104,7 +105,17 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($wslRepository)) {
 if ($wslRepository.Contains("'")) {
     throw 'Repository paths containing a single quote are not supported by this build wrapper.'
 }
-$buildCommand = "cd '$wslRepository' && cmake --preset $BuildPreset && " +
+if (-not [string]::IsNullOrWhiteSpace($WslToolEnvironmentFile)) {
+    if (-not $WslToolEnvironmentFile.StartsWith('/') -or
+        $WslToolEnvironmentFile.Contains("'")) {
+        throw 'WslToolEnvironmentFile must be an absolute WSL path without a single quote.'
+    }
+    $environmentCommand = ". '$WslToolEnvironmentFile' && "
+} else {
+    $environmentCommand =
+        '. "${INFERENCEOS_ENVIRONMENT_FILE:-${HOME}/.local/share/inferenceos/tools/environment.sh}" && '
+}
+$buildCommand = $environmentCommand + "cd '$wslRepository' && cmake --preset $BuildPreset && " +
     "cmake --build --preset $BuildPreset --target inferenceos-image"
 Write-Host "Building current InferenceOS source with preset '$BuildPreset'..."
 Invoke-Checked { & wsl.exe -e bash -lc $buildCommand } 'InferenceOS build'

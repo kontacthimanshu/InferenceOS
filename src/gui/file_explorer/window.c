@@ -2,6 +2,8 @@
 
 #include <inferenceos/runtime.h>
 
+static const char file_explorer_title[] = "File Explorer";
+
 enum {
     FILE_EXPLORER_BACKGROUND = UINT32_C(0x00f2f2f2),
     FILE_EXPLORER_HEADER = UINT32_C(0x00344f70),
@@ -228,7 +230,7 @@ ios_status ios_file_explorer_window_initialize(
     window->model = model;
     window->surface = surface;
     window->font = font;
-    window->title = "Files";
+    window->title = file_explorer_title;
     copy_location(window->location_storage, "Folder: /");
     window->location = window->location_storage;
     window->background_color = FILE_EXPLORER_BACKGROUND;
@@ -252,7 +254,7 @@ ios_status ios_file_explorer_window_render(struct ios_file_explorer_window *wind
     }, FILE_EXPLORER_HEADER);
     ios_status status = ios_graphics_draw_text(
         &window->surface, window->font,
-        window->title == NULL ? "Files" : window->title, 8, 2,
+        window->title == NULL ? file_explorer_title : window->title, 8, 2,
         FILE_EXPLORER_ICON_PAGE, FILE_EXPLORER_HEADER, false
     );
     if (IOS_FAILED(status)) return status;

@@ -85,6 +85,13 @@ typedef ios_status (*ios_vfs_create_directory_function)(
     ios_size component_length,
     struct ios_vfs_object *object
 );
+typedef ios_status (*ios_vfs_create_file_function)(
+    void *driver_context,
+    ios_u64 parent_identity,
+    const char *component,
+    ios_size component_length,
+    struct ios_vfs_object *object
+);
 typedef ios_status (*ios_vfs_remove_directory_function)(
     void *driver_context,
     ios_u64 parent_identity,
@@ -109,6 +116,38 @@ typedef ios_status (*ios_vfs_search_extension_function)(
     ios_size *entry_count,
     bool *truncated
 );
+typedef ios_status (*ios_vfs_read_object_function)(
+    void *driver_context,
+    ios_u64 object_identity,
+    ios_u64 offset,
+    void *buffer,
+    ios_size capacity,
+    ios_size *transferred,
+    bool *complete
+);
+typedef ios_status (*ios_vfs_replace_object_function)(
+    void *driver_context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+typedef ios_status (*ios_vfs_append_object_function)(
+    void *driver_context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+typedef ios_status (*ios_vfs_remove_object_function)(
+    void *driver_context,
+    ios_u64 object_identity
+);
+typedef ios_status (*ios_vfs_rename_object_function)(
+    void *driver_context,
+    ios_u64 object_identity,
+    ios_u64 destination_parent_identity,
+    const char *destination_base,
+    ios_size destination_base_length
+);
 
 typedef ios_status (*ios_vfs_unmount_sync_function)(void *context);
 typedef void (*ios_vfs_unmount_invalidate_function)(void *context);
@@ -127,9 +166,15 @@ struct ios_vfs_mount {
     ios_vfs_enumerate_function enumerate;
     ios_vfs_lookup_function lookup;
     ios_vfs_create_directory_function create_directory;
+    ios_vfs_create_file_function create_file;
     ios_vfs_remove_directory_function remove_directory;
     ios_vfs_rename_function rename;
     ios_vfs_search_extension_function search_extension;
+    ios_vfs_read_object_function read_object;
+    ios_vfs_replace_object_function replace_object;
+    ios_vfs_append_object_function append_object;
+    ios_vfs_remove_object_function remove_object;
+    ios_vfs_rename_object_function rename_object;
     enum ios_mount_state state;
     void *unmount_context;
     ios_vfs_unmount_sync_function unmount_sync;
@@ -184,6 +229,11 @@ ios_status vfs_create_directory(
     const char *path,
     struct ios_vfs_object *object
 );
+ios_status vfs_create_file(
+    const struct ios_vfs_path_context *context,
+    const char *path,
+    struct ios_vfs_object *object
+);
 ios_status vfs_remove_directory(
     const struct ios_vfs_path_context *context,
     const char *path
@@ -210,6 +260,38 @@ ios_status vfs_search_extension(
     ios_size capacity,
     ios_size *entry_count,
     bool *truncated
+);
+ios_status vfs_read_object(
+    struct ios_vfs_mount *mount,
+    ios_u64 object_identity,
+    ios_u64 offset,
+    void *buffer,
+    ios_size capacity,
+    ios_size *transferred,
+    bool *complete
+);
+ios_status vfs_replace_object(
+    struct ios_vfs_mount *mount,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+ios_status vfs_append_object(
+    struct ios_vfs_mount *mount,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+ios_status vfs_remove_object(
+    struct ios_vfs_mount *mount,
+    ios_u64 object_identity
+);
+ios_status vfs_rename_object(
+    struct ios_vfs_mount *mount,
+    ios_u64 object_identity,
+    ios_u64 destination_parent_identity,
+    const char *destination_base,
+    ios_size destination_base_length
 );
 ios_status vfs_mount_root(
     struct ios_vfs_mount_registry *registry, struct ios_vfs_mount *mount, const char *path

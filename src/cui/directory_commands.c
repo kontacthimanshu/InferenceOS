@@ -23,7 +23,6 @@ static ios_status dir_command(
 {
     struct ios_cui_fs_context *context = io == NULL ? NULL : io->command_context;
     struct ios_display_safe_entry entries[IOS_CUI_DIRECTORY_ENTRY_CAPACITY];
-    ios_size ranks[IOS_CUI_DIRECTORY_ENTRY_CAPACITY];
     ios_size entry_count = 0;
     const char *path;
     ios_status status;
@@ -38,9 +37,7 @@ static ios_status dir_command(
     );
     if (IOS_FAILED(status)) return status;
     if (entry_count > IOS_CUI_DIRECTORY_ENTRY_CAPACITY) return IOS_ERROR(IOS_E_PROTOCOL);
-    status = ios_display_safe_entries_disambiguate(
-        entries, entry_count, ranks, IOS_CUI_DIRECTORY_ENTRY_CAPACITY
-    );
+    status = ios_display_safe_entries_validate_final(entries, entry_count);
     if (IOS_FAILED(status)) return status;
     for (ios_size index = 0; index < entry_count; ++index) {
         const struct ios_display_safe_entry *entry = &entries[index];

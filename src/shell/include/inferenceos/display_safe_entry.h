@@ -76,5 +76,9 @@ ios_status ios_display_safe_entries_disambiguate(
     ios_size *rank_workspace,
     ios_size workspace_count
 );
+ios_status ios_display_safe_entries_validate_final(
+    const struct ios_display_safe_entry *entries,
+    ios_size count
+);
 
 #endif

@@ -35,7 +35,8 @@ enum ios_error {
     IOS_E_NOT_EMPTY = 22,
     IOS_E_PROTOCOL = 23,
     IOS_E_INVALID_STATE = 24,
-    IOS_E_UNKNOWN_SYSCALL = 25
+    IOS_E_UNKNOWN_SYSCALL = 25,
+    IOS_E_UNEXPECTED_FORMAT = 26
 };
 
 #define IOS_OK ((ios_status)0)

@@ -15,7 +15,11 @@ enum {
 
 struct fake_directory {
     struct ios_vfs_directory_entry entries[4];
+    struct ios_vfs_directory_entry nested_entries[4];
+    ios_size entry_count;
+    ios_size nested_entry_count;
     ios_size calls;
+    bool force_truncated;
 };
 
 static struct ios_vfs_directory_entry make_entry(
@@ -50,16 +54,46 @@ static ios_status enumerate_directory(
 )
 {
     struct fake_directory *directory = context;
+    const struct ios_vfs_directory_entry *source_entries;
+    ios_size source_count;
     ios_size source = (ios_size)continuation;
     ++directory->calls;
-    if (directory_identity != IOS_VFS_ROOT_OBJECT_ID || source >= 4) {
+    if (directory_identity == IOS_VFS_ROOT_OBJECT_ID) {
+        source_entries = directory->entries;
+        source_count = directory->entry_count;
+    } else if (directory_identity == 13) {
+        source_entries = directory->nested_entries;
+        source_count = directory->nested_entry_count;
+    } else {
         return IOS_ERROR(IOS_E_NOT_FOUND);
     }
+    if (source > source_count) return IOS_ERROR(IOS_E_NOT_FOUND);
     *entry_count = 0;
-    while (source < 4 && *entry_count < capacity) {
-        entries[(*entry_count)++] = directory->entries[source++];
+    while (source < source_count && *entry_count < capacity) {
+        entries[(*entry_count)++] = source_entries[source++];
     }
-    *next_continuation = source < 4 ? source : 0;
+    *next_continuation = source < source_count
+        || (directory_identity == IOS_VFS_ROOT_OBJECT_ID && directory->force_truncated)
+        ? source : 0;
+    return IOS_OK;
+}
+
+static ios_status lookup_directory(
+    void *context,
+    ios_u64 directory_identity,
+    const char *component,
+    ios_size component_length,
+    struct ios_vfs_object *object
+)
+{
+    (void)context;
+    if (object == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (directory_identity != IOS_VFS_ROOT_OBJECT_ID
+        || component_length != sizeof("DOCS.ARC") - 1U
+        || memcmp(component, "DOCS.ARC", component_length) != 0) {
+        return IOS_ERROR(IOS_E_NOT_FOUND);
+    }
+    *object = (struct ios_vfs_object){ 13, IOS_VFS_OBJECT_DIRECTORY, 0 };
     return IOS_OK;
 }
 
@@ -76,12 +110,19 @@ static void initialize_stack(
 )
 {
     ios_type_icon_capability generic_capability;
-    *directory = (struct fake_directory){ .entries = {
-        make_entry("REPORT", 7, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("CHART", 9, IMAGE_TYPE, IMAGE_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("NOTES", 11, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
-        make_entry("DOCS", 13, 0, 0, IOS_VFS_OBJECT_DIRECTORY)
-    } };
+    *directory = (struct fake_directory){
+        .entries = {
+            make_entry("REPORT", 7, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+            make_entry("CHART", 9, IMAGE_TYPE, IMAGE_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+            make_entry("NOTES", 11, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE),
+            make_entry("DOCS", 13, 0, 0, IOS_VFS_OBJECT_DIRECTORY)
+        },
+        .nested_entries = {
+            make_entry("NOTE", 15, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE)
+        },
+        .entry_count = 4,
+        .nested_entry_count = 1
+    };
     *device = (struct ios_block_device){ 0 };
     *root = (struct ios_vfs_object){ IOS_VFS_ROOT_OBJECT_ID, IOS_VFS_OBJECT_DIRECTORY, 0 };
     *mount = (struct ios_vfs_mount){
@@ -90,6 +131,7 @@ static void initialize_stack(
         .device = device,
         .root = root,
         .enumerate = enumerate_directory,
+        .lookup = lookup_directory,
         .state = IOS_MOUNT_RW
     };
     vfs_mount_registry_initialize(registry);
@@ -271,11 +313,179 @@ static void test_unmapped_files_receive_nonzero_generic_icon_capability(void)
     IOS_TEST_ASSERT(icon == IOS_ICON_GENERIC_FILE);
 }
 
+static void test_display_path_resolution_uses_exact_three_way_collision_labels(void)
+{
+    struct fake_directory directory;
+    struct ios_block_device device;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_mount_registry registry;
+    struct ios_vfs_path_context path;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service service;
+    struct ios_file_view_resolved_object resolved;
+    struct ios_display_safe_entry entries[IOS_FILE_VIEW_DIRECTORY_CAPACITY];
+    ios_size entry_count;
+    ios_type_icon_capability text_capability;
+    ios_type_icon_capability image_capability;
+    initialize_stack(
+        &directory, &device, &root, &mount, &registry, &catalog, &service,
+        &text_capability, &image_capability
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_context_initialize(&path, &mount), IOS_OK);
+    directory.entries[1] = make_entry(
+        "REPORT", 9, IMAGE_TYPE, IMAGE_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE
+    );
+    directory.entries[2] = make_entry(
+        "REPORT", 11, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_list_directory_path(
+            &service, &path, "/", entries, IOS_ARRAY_COUNT(entries), &entry_count
+        ), IOS_OK);
+    IOS_TEST_ASSERT(entry_count == 4);
+    IOS_TEST_ASSERT(strcmp(entries[0].display_name, "REPORT") == 0);
+    IOS_TEST_ASSERT(strcmp(entries[1].display_name, "REPORT (2)") == 0);
+    IOS_TEST_ASSERT(strcmp(entries[2].display_name, "REPORT (3)") == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "REPORT", &resolved), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 7 && resolved.parent_identity == 2);
+    IOS_TEST_ASSERT(resolved.internal_type_identity == TEXT_TYPE);
+    IOS_TEST_ASSERT(resolved.byte_size == 64);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "report", &resolved), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 7 && resolved.parent_identity == 2);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/REPORT (2)", &resolved
+        ), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 9);
+    IOS_TEST_ASSERT(resolved.internal_type_identity == IMAGE_TYPE);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/REPORT (3)", &resolved
+        ), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 11);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/REPORT.TXT", &resolved
+        ), IOS_ERROR(IOS_E_NOT_FOUND));
+
+    directory.entries[0] = make_entry(
+        "OTHER", 7, TEXT_TYPE, TEXT_PREFILTER, IOS_VFS_OBJECT_REGULAR_FILE
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "/REPORT", &resolved), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 9);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/REPORT (2)", &resolved
+        ), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 11);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/REPORT (3)", &resolved
+        ), IOS_ERROR(IOS_E_NOT_FOUND));
+}
+
+static void test_directory_listing_keeps_vfs_path_operands(void)
+{
+    struct fake_directory directory;
+    struct ios_block_device device;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_mount_registry registry;
+    struct ios_vfs_path_context path;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service service;
+    struct ios_display_safe_entry entries[IOS_FILE_VIEW_DIRECTORY_CAPACITY];
+    ios_size entry_count;
+    ios_type_icon_capability text_capability;
+    ios_type_icon_capability image_capability;
+    initialize_stack(
+        &directory, &device, &root, &mount, &registry, &catalog, &service,
+        &text_capability, &image_capability
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_context_initialize(&path, &mount), IOS_OK);
+    memcpy(path.current_directory, "/DOCS.ARC", sizeof("/DOCS.ARC"));
+    path.current_directory_identity = 13;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_list_directory_path(
+            &service, &path, ".", entries, IOS_ARRAY_COUNT(entries), &entry_count
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(entry_count == 1);
+    IOS_TEST_ASSERT(strcmp(entries[0].display_name, "NOTE") == 0);
+}
+
+static void test_display_path_resolution_walks_intermediate_directories_and_relative_paths(void)
+{
+    struct fake_directory directory;
+    struct ios_block_device device;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_mount_registry registry;
+    struct ios_vfs_path_context path;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service service;
+    struct ios_file_view_resolved_object resolved;
+    ios_type_icon_capability text_capability;
+    ios_type_icon_capability image_capability;
+    initialize_stack(
+        &directory, &device, &root, &mount, &registry, &catalog, &service,
+        &text_capability, &image_capability
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_context_initialize(&path, &mount), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(
+            &service, &path, "/docs/note", &resolved
+        ), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 15 && resolved.parent_identity == 13);
+    memcpy(path.current_directory, "/DOCS", sizeof("/DOCS"));
+    path.current_directory_identity = 13;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "note", &resolved), IOS_OK);
+    IOS_TEST_ASSERT(resolved.object_identity == 15 && resolved.parent_identity == 13);
+}
+
+static void test_display_path_resolution_fails_closed_on_incomplete_or_duplicate_view(void)
+{
+    struct fake_directory directory;
+    struct ios_block_device device;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_mount_registry registry;
+    struct ios_vfs_path_context path;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service service;
+    struct ios_file_view_resolved_object resolved;
+    ios_type_icon_capability text_capability;
+    ios_type_icon_capability image_capability;
+    initialize_stack(
+        &directory, &device, &root, &mount, &registry, &catalog, &service,
+        &text_capability, &image_capability
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_context_initialize(&path, &mount), IOS_OK);
+    directory.force_truncated = true;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "REPORT", &resolved),
+        IOS_ERROR(IOS_E_NO_SPACE));
+    directory.force_truncated = false;
+    directory.entries[1].object_identity = directory.entries[0].object_identity;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_resolve_display_path(&service, &path, "REPORT", &resolved),
+        IOS_ERROR(IOS_E_CORRUPT));
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_directory_view_returns_bounded_display_safe_entries),
     IOS_TEST_CASE(test_type_and_search_use_binary_hash_then_verify_exact_identity),
     IOS_TEST_CASE(test_pagination_and_forged_type_capability_are_bounded),
-    IOS_TEST_CASE(test_unmapped_files_receive_nonzero_generic_icon_capability)
+    IOS_TEST_CASE(test_unmapped_files_receive_nonzero_generic_icon_capability),
+    IOS_TEST_CASE(test_display_path_resolution_uses_exact_three_way_collision_labels),
+    IOS_TEST_CASE(test_directory_listing_keeps_vfs_path_operands),
+    IOS_TEST_CASE(test_display_path_resolution_walks_intermediate_directories_and_relative_paths),
+    IOS_TEST_CASE(test_display_path_resolution_fails_closed_on_incomplete_or_duplicate_view)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

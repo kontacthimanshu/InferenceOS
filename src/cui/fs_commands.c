@@ -340,7 +340,9 @@ ios_status ios_cui_fs_set_file_operations(
     if (context == NULL || operations == NULL || operations->create == NULL
         || operations->write == NULL || operations->append == NULL
         || operations->type == NULL || operations->rename == NULL
-        || operations->remove == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+        || operations->remove == NULL || operations->cat == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
     context->file_context = file_context;
     context->file_operations = *operations;
     return IOS_OK;

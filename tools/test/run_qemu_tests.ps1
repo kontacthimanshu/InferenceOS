@@ -189,6 +189,7 @@ function Invoke-ReleaseMatrix {
         [ordered]@{ Name = 'file-explorer'; Script = 'file_explorer_test.ps1'; Timeout = 60; Arguments = @() },
         [ordered]@{ Name = 'reboot-persistence'; Script = 'reboot_persistence_test.ps1'; Timeout = 120; Arguments = @('-CycleCount', '20') },
         [ordered]@{ Name = 'directory-interop'; Script = 'directory_interop_test.ps1'; Timeout = 120; Arguments = @() },
+        [ordered]@{ Name = 'display-safe-file-commands'; Script = 'display_safe_file_commands_test.ps1'; Timeout = 120; Arguments = @() },
         [ordered]@{ Name = 'fault-matrix'; Script = 'fault_matrix_test.ps1'; Timeout = 120; Arguments = @() },
         [ordered]@{ Name = 'registry-benchmark'; Script = 'registry_benchmark_qemu_test.ps1'; Timeout = 120; Arguments = @() }
     )

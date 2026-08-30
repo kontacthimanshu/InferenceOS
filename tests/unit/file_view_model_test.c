@@ -248,6 +248,7 @@ static void test_pointer_keyboard_navigation_and_rendering_use_safe_model(void)
         ios_file_explorer_model_initialize(&model, make_fake_provider(&fake), 1), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
         ios_file_explorer_window_initialize(&window, &model, surface, &font), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(window.title, "File Explorer") == 0);
     IOS_TEST_ASSERT_STATUS(
         ios_file_explorer_window_handle_input(&window, &pointer, &activated, &handle), IOS_OK);
     IOS_TEST_ASSERT(ios_file_explorer_model_selected(&model)->object_handle == 9);

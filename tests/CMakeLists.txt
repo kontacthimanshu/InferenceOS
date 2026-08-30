@@ -174,6 +174,7 @@ inferenceos_add_host_test(
     inferenceos_vfs_path_test
     unit/vfs_path_test.c
     "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/directory.c"
     "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
 )
 target_include_directories(
@@ -383,6 +384,10 @@ inferenceos_add_host_test(
     integration/file_service_test.c
     "${PROJECT_SOURCE_DIR}/src/block/device.c"
     "${PROJECT_SOURCE_DIR}/src/block/cache.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/process/type_catalog.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/file_command.c"
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/file_view.c"
+    "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/file_service.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/transaction.c"
     "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/registry.c"
@@ -396,11 +401,13 @@ inferenceos_add_host_test(
     "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
     "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
     "${PROJECT_SOURCE_DIR}/src/vfs/directory.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/file.c"
 )
 target_include_directories(
     inferenceos_file_service_test PRIVATE
         "${PROJECT_SOURCE_DIR}/src/block/include"
         "${PROJECT_SOURCE_DIR}/src/filesystems/inferenceos_fs/include"
+        "${PROJECT_SOURCE_DIR}/src/shell/include"
         "${PROJECT_SOURCE_DIR}/src/vfs/include"
 )
 target_link_libraries(inferenceos_file_service_test PRIVATE InferenceOS::TestSupport)
@@ -935,6 +942,7 @@ inferenceos_add_host_test(
     "${PROJECT_SOURCE_DIR}/src/shell/display_safe_entry.c"
     "${PROJECT_SOURCE_DIR}/src/vfs/mount.c"
     "${PROJECT_SOURCE_DIR}/src/vfs/unmount.c"
+    "${PROJECT_SOURCE_DIR}/src/vfs/path.c"
 )
 target_include_directories(
     inferenceos_file_view_service_test PRIVATE
@@ -945,6 +953,25 @@ add_test(NAME file-view-service-integration COMMAND inferenceos_file_view_servic
 set_tests_properties(
     file-view-service-integration
     PROPERTIES LABELS "host;integration;kernel;vfs;file-view;metadata-hiding;bounds;collision"
+)
+
+inferenceos_add_host_test(
+    inferenceos_display_safe_file_command_test
+    contract/display_safe_file_command_test.c
+    "${PROJECT_SOURCE_DIR}/src/kernel/syscall/file_command.c"
+)
+target_include_directories(
+    inferenceos_display_safe_file_command_test PRIVATE
+        "${PROJECT_SOURCE_DIR}/src/block/include"
+        "${PROJECT_SOURCE_DIR}/src/vfs/include"
+)
+add_test(
+    NAME display-safe-file-command-contract
+    COMMAND inferenceos_display_safe_file_command_test
+)
+set_tests_properties(
+    display-safe-file-command-contract
+    PROPERTIES LABELS "host;contract;kernel;cui;vfs;capability;metadata-hiding"
 )
 
 inferenceos_add_host_test(
@@ -1210,3 +1237,23 @@ add_test(NAME fs-commands-integration COMMAND inferenceos_fs_commands_test)
 set_tests_properties(
     fs-commands-integration PROPERTIES LABELS "host;integration;cui;filesystem;mount;vfs;storage"
 )
+
+inferenceos_powershell_path(
+    _inferenceos_display_safe_file_commands_system_test
+    "${PROJECT_SOURCE_DIR}/tests/system/display_safe_file_commands_test.ps1"
+)
+add_test(
+    NAME display-safe-file-commands-system-contract
+    COMMAND
+        "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -File "${_inferenceos_display_safe_file_commands_system_test}"
+        -EspPath dry-run-esp.img
+        -PersistentDiskPath dry-run-disk.raw
+        -DryRun
+)
+set_tests_properties(
+    display-safe-file-commands-system-contract
+    PROPERTIES LABELS "host;contract;system;cui;filesystem"
+)
+unset(_inferenceos_display_safe_file_commands_system_test)

@@ -184,9 +184,10 @@ The complete primary-toolchain QEMU story matrix can be launched after building 
   -ReleaseMatrix -RetainSuccessfulArtifacts
 ```
 
-The matrix covers boot/GUI/recovery, format/mount, File Explorer, reboot persistence, and directory
-interoperability. It writes `evidence-manifest.json` with suite outcomes and hashed evidence beneath
-`build/qemu-tests/`. A dry-run (`-DryRun`) validates and records the matrix without starting QEMU.
+The matrix covers boot/GUI/recovery, format/mount, File Explorer, reboot persistence, directory
+interoperability, and display-safe CUI file commands. It writes `evidence-manifest.json` with suite
+outcomes and hashed evidence beneath `build/qemu-tests/`. A dry-run (`-DryRun`) validates and
+records the matrix without starting QEMU.
 
 Run the matched registry research workload and generate its report directly from the packaged
 images with:

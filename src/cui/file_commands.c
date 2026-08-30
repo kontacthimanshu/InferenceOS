@@ -23,9 +23,17 @@ static ios_status write_command(
 )
 {
     struct ios_cui_fs_context *context = file_context(io);
+    ios_status status;
     if (count != 3) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     if (context == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     if (context->file_operations.write == NULL) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    status = context->file_operations.write(
+        context->file_context, arguments[1], arguments[2], strlen(arguments[2])
+    );
+    if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    if (context->file_operations.create == NULL) return status;
+    status = context->file_operations.create(context->file_context, arguments[1]);
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_ALREADY_EXISTS)) return status;
     return context->file_operations.write(
         context->file_context, arguments[1], arguments[2], strlen(arguments[2])
     );
@@ -53,6 +61,21 @@ static ios_status type_command(
     if (context == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
     if (context->file_operations.type == NULL) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
     return context->file_operations.type(
+        context->file_context, arguments[1], io->write, io->write_context
+    );
+}
+
+static ios_status cat_command(
+    ios_size count, const char *const *arguments, struct ios_cui_io *io
+)
+{
+    struct ios_cui_fs_context *context = file_context(io);
+    if (count != 2) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    if (context == NULL || io == NULL || io->write == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    if (context->file_operations.cat == NULL) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    return context->file_operations.cat(
         context->file_context, arguments[1], io->write, io->write_context
     );
 }
@@ -128,11 +151,12 @@ static ios_status search_command(
 
 static const struct ios_cui_command file_descriptors[] = {
     { "create", "create an empty file", "create <path>", create_command },
-    { "write", "replace file content", "write <path> \"<text>\"", write_command },
-    { "append", "append file content", "append <path> \"<text>\"", append_command },
+    { "write", "create or initialize an empty file with text", "write <display-path> \"<text>\"", write_command },
+    { "append", "append to an empty or validated text file", "append <display-path> \"<text>\"", append_command },
     { "type", "display file content", "type <path>", type_command },
-    { "rename", "rename a file", "rename <source> <destination>", rename_command },
-    { "delete", "delete a file", "delete <path>", delete_command },
+    { "cat", "display validated text file content", "cat <display-path>", cat_command },
+    { "rename", "rename a displayed file and preserve its type", "rename <display-source> <display-destination>", rename_command },
+    { "delete", "delete a displayed file", "delete <display-path>", delete_command },
     { "search", "find files by extension", "search <extension>", search_command }
 };
 

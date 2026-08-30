@@ -706,6 +706,7 @@ add_library(
         src/vfs/mount.c
         src/vfs/path.c
         src/vfs/directory.c
+        src/vfs/file.c
         src/vfs/unmount.c
 )
 add_library(InferenceOS::Vfs ALIAS inferenceos_vfs)
@@ -806,6 +807,7 @@ add_library(
         src/kernel/syscall/entry.S
         src/kernel/syscall/dispatch.c
         src/kernel/syscall/extension_search.c
+        src/kernel/syscall/file_command.c
         src/kernel/syscall/file_view.c
         src/kernel/syscall/fs_diagnostic.c
         src/kernel/syscall/gui_view.c
@@ -1143,6 +1145,10 @@ inferenceos_powershell_path(
 inferenceos_powershell_path(
     _inferenceos_ps_directory_interop_test
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/directory_interop_test.ps1"
+)
+inferenceos_powershell_path(
+    _inferenceos_ps_display_safe_file_commands_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/display_safe_file_commands_test.ps1"
 )
 inferenceos_powershell_path(
     _inferenceos_ps_bootstrap_test
@@ -1681,8 +1687,31 @@ add_custom_target(
     VERBATIM
 )
 add_custom_target(
+    test-display-safe-file-commands
+    COMMAND
+        "${INFERENCEOS_POWERSHELL_EXECUTABLE}"
+        -NoProfile
+        -File "${_inferenceos_ps_display_safe_file_commands_test}"
+        ${_inferenceos_qemu_common_arguments}
+        -ArtifactDirectory "${_inferenceos_ps_qemu_artifacts}"
+        -TimeoutSeconds 120
+    DEPENDS
+        inferenceos-image
+        inferenceos-test-disk
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/display_safe_file_commands_test.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/run_inferenceos.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test/run_qemu_tests.ps1"
+    USES_TERMINAL
+    VERBATIM
+)
+add_custom_target(
     inferenceos-qemu-tests
-    DEPENDS test-gui test-format-mount test-reboot-persistence test-directory-interop
+    DEPENDS
+        test-gui
+        test-format-mount
+        test-reboot-persistence
+        test-directory-interop
+        test-display-safe-file-commands
 )
 add_custom_target(
     benchmark-registry-qemu
@@ -1720,6 +1749,7 @@ add_custom_target(
         inferenceos-validate-dependencies
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/boot_gui_test.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/directory_interop_test.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/display_safe_file_commands_test.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/fault_matrix_test.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/file_explorer_test.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/system/format_mount_test.ps1"
@@ -1742,6 +1772,7 @@ unset(_inferenceos_artifact_manifest_artifacts)
 unset(_inferenceos_qemu_common_arguments)
 unset(_inferenceos_registry_benchmark_arguments)
 unset(_inferenceos_ps_directory_interop_test)
+unset(_inferenceos_ps_display_safe_file_commands_test)
 unset(_inferenceos_module_dependencies)
 unset(_inferenceos_esp_dependencies)
 unset(_inferenceos_ps_build_modules)

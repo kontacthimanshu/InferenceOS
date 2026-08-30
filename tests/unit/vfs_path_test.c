@@ -6,6 +6,9 @@
 
 struct lookup_fixture {
     ios_size calls;
+    ios_size create_calls;
+    ios_u64 create_parent;
+    char create_component[16];
 };
 
 static bool component_is(const char *component, ios_size length, const char *expected)
@@ -38,6 +41,26 @@ static ios_status lookup_child(
     return IOS_ERROR(IOS_E_NOT_FOUND);
 }
 
+static ios_status create_file(
+    void *context,
+    ios_u64 parent_identity,
+    const char *component,
+    ios_size component_length,
+    struct ios_vfs_object *object
+)
+{
+    struct lookup_fixture *fixture = context;
+    if (component_length >= sizeof(fixture->create_component)) {
+        return IOS_ERROR(IOS_E_OUT_OF_RANGE);
+    }
+    ++fixture->create_calls;
+    fixture->create_parent = parent_identity;
+    memcpy(fixture->create_component, component, component_length);
+    fixture->create_component[component_length] = '\0';
+    *object = (struct ios_vfs_object){ 9, IOS_VFS_OBJECT_REGULAR_FILE, 0 };
+    return IOS_OK;
+}
+
 static void initialize_path_fixture(
     struct lookup_fixture *fixture,
     struct ios_vfs_object *root,
@@ -52,6 +75,7 @@ static void initialize_path_fixture(
     mount->driver_context = fixture;
     mount->root = root;
     mount->lookup = lookup_child;
+    mount->create_file = create_file;
     mount->state = IOS_MOUNT_RW;
     mount->lifecycle = IOS_VFS_MOUNT_ACTIVE;
     mount->generation = 7;
@@ -183,6 +207,22 @@ static void test_current_directory_updates_atomically_and_clamps_at_root(void)
     IOS_TEST_ASSERT(strcmp(context.current_directory, "/DOCS") == 0);
 }
 
+static void test_relative_file_creation_uses_current_directory_identity(void)
+{
+    struct lookup_fixture fixture;
+    struct ios_vfs_object root;
+    struct ios_vfs_mount mount;
+    struct ios_vfs_path_context context;
+    struct ios_vfs_object object;
+    initialize_path_fixture(&fixture, &root, &mount, &context);
+    IOS_TEST_ASSERT_STATUS(vfs_path_set_current(&context, "/DOCS"), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(vfs_create_file(&context, "NOTE.TXT", &object), IOS_OK);
+    IOS_TEST_ASSERT(fixture.create_calls == 1 && fixture.create_parent == 3);
+    IOS_TEST_ASSERT(strcmp(fixture.create_component, "NOTE.TXT") == 0);
+    IOS_TEST_ASSERT(object.identity == 9 && object.kind == IOS_VFS_OBJECT_REGULAR_FILE);
+    IOS_TEST_ASSERT(mount.active_operations == 0);
+}
+
 static void test_rejects_stale_context_and_invalid_driver_results(void)
 {
     struct lookup_fixture fixture;
@@ -209,6 +249,7 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_rejects_invalid_arguments),
     IOS_TEST_CASE(test_resolves_absolute_and_relative_objects),
     IOS_TEST_CASE(test_current_directory_updates_atomically_and_clamps_at_root),
+    IOS_TEST_CASE(test_relative_file_creation_uses_current_directory_identity),
     IOS_TEST_CASE(test_rejects_stale_context_and_invalid_driver_results)
 };
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

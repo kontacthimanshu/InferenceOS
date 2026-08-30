@@ -81,7 +81,7 @@ static ios_status dispatch_query(
             return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
         }
         status = context->diagnostic.resolve_object(
-            context->diagnostic.resolver_context, path, &object_identity
+            context->diagnostic.resolver_context, query, path, &object_identity
         );
         if (IOS_FAILED(status)) return status;
         if (object_identity == 0) return IOS_ERROR(IOS_E_PROTOCOL);
@@ -209,9 +209,9 @@ static ios_status fatinfo_command(
 }
 
 static const struct ios_cui_command descriptors[] = {
-    { "fileinfo", "show privileged internal file metadata", "fileinfo <path>", fileinfo_command },
-    { "hashinfo", "show privileged extension-hash validation", "hashinfo <path>", hashinfo_command },
-    { "fatinfo", "show a bounded validated cluster chain", "fatinfo <path>", fatinfo_command }
+    { "fileinfo", "show metadata for a displayed file", "fileinfo <display-path>", fileinfo_command },
+    { "hashinfo", "show privileged extension-hash validation", "hashinfo <display-or-canonical-path>", hashinfo_command },
+    { "fatinfo", "show a bounded validated cluster chain", "fatinfo <display-or-canonical-path>", fatinfo_command }
 };
 
 ios_status ios_cui_fs_set_diagnostic_service(

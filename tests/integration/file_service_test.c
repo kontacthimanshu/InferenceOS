@@ -2,6 +2,7 @@
 
 #include <inferenceos/block.h>
 #include <inferenceos/fake_block.h>
+#include <inferenceos/file_command.h>
 #include <inferenceos/fs/file_service.h>
 #include <inferenceos/runtime.h>
 
@@ -23,6 +24,20 @@ struct fixture {
     struct ios_vfs_path_context path;
     ios_u32 fat[TEST_FAT_ENTRIES];
 };
+
+struct text_output {
+    char bytes[64];
+    ios_size length;
+};
+
+static void capture_text(const char *text, void *context)
+{
+    struct text_output *output = context;
+    const ios_size length = strlen(text);
+    IOS_TEST_ASSERT(output->length + length < sizeof(output->bytes));
+    memcpy(output->bytes + output->length, text, length + 1U);
+    output->length += length;
+}
 
 static ios_status device_read(
     void *context, ios_u64 sector, ios_size count, void *buffer
@@ -189,6 +204,44 @@ static void test_file_lifecycle_is_durable_and_preserves_companion_metadata(void
     destroy_fixture(&fixture);
 }
 
+static void test_visible_base_names_are_unique_across_types_and_directories(void)
+{
+    struct fixture fixture;
+    struct ios_vfs_object object;
+    initialize_fixture(&fixture);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/FILE1.TXT"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/FILE1.LOG"),
+        IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/FILE1"),
+        IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        vfs_create_directory(&fixture.path, "/FILE1", &object),
+        IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/OTHER.LOG"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_rename(
+            &fixture.service, "/OTHER.LOG", "/FILE1.LOG"
+        ), IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        vfs_create_directory(&fixture.path, "/FOLDER", &object), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/FOLDER.TXT"),
+        IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    destroy_fixture(&fixture);
+}
+
 static void test_file_service_rejects_bad_names_and_read_only_mutation(void)
 {
     struct fixture fixture;
@@ -228,7 +281,7 @@ static void test_directory_vfs_and_nested_file_commands_use_real_disk_records(vo
     IOS_TEST_ASSERT(object.kind == IOS_VFS_OBJECT_DIRECTORY && object.identity > 2);
     IOS_TEST_ASSERT_STATUS(vfs_path_set_current(&fixture.path, "/DOCS"), IOS_OK);
     IOS_TEST_ASSERT_STATUS(
-        ios_fs_file_service_create(&fixture.service, "/DOCS/NOTE.TXT"), IOS_OK
+        vfs_create_file(&fixture.path, "NOTE.TXT", &object), IOS_OK
     );
     IOS_TEST_ASSERT_STATUS(
         ios_fs_file_service_replace(
@@ -270,6 +323,53 @@ static void test_directory_vfs_and_nested_file_commands_use_real_disk_records(vo
     IOS_TEST_ASSERT_STATUS(
         ios_fs_file_service_remove(&fixture.service, "/RENAMED.TXT"), IOS_OK
     );
+    destroy_fixture(&fixture);
+}
+
+static void test_relative_create_keeps_all_files_in_current_directory(void)
+{
+    static const char *const names[] = {
+        "ONE.TXT", "TWO.TXT", "THREE.TXT", "FOUR.TXT",
+        "FIVE.TXT", "SIX.TXT", "SEVEN.TXT", "EIGHT.TXT"
+    };
+    struct fixture fixture;
+    struct ios_vfs_object object;
+    struct ios_vfs_directory_entry entries[IOS_ARRAY_COUNT(names)];
+    char current[IOS_VFS_PATH_CAPACITY];
+    ios_u64 continuation;
+    ios_size entry_count;
+
+    initialize_fixture(&fixture);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_create_directory(&fixture.path, "/TEST", &object), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_set_current(&fixture.path, "/TEST"), IOS_OK);
+    for (ios_size index = 0; index < IOS_ARRAY_COUNT(names); ++index) {
+        IOS_TEST_ASSERT_STATUS(
+            vfs_create_file(&fixture.path, names[index], &object), IOS_OK
+        );
+        IOS_TEST_ASSERT(object.kind == IOS_VFS_OBJECT_REGULAR_FILE);
+    }
+    IOS_TEST_ASSERT_STATUS(
+        vfs_path_get_current(&fixture.path, current, sizeof(current)), IOS_OK
+    );
+    IOS_TEST_ASSERT(strcmp(current, "/TEST") == 0);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_list_directory(
+            &fixture.path, ".", 0, entries, IOS_ARRAY_COUNT(entries),
+            &entry_count, &continuation
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(entry_count == IOS_ARRAY_COUNT(names) && continuation == 0);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_list_directory(
+            &fixture.path, "/", 0, entries, IOS_ARRAY_COUNT(entries),
+            &entry_count, &continuation
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(entry_count == 1 && continuation == 0);
+    IOS_TEST_ASSERT(entries[0].kind == IOS_VFS_OBJECT_DIRECTORY);
+    IOS_TEST_ASSERT(strcmp(entries[0].display_base_name, "TEST") == 0);
     destroy_fixture(&fixture);
 }
 
@@ -393,14 +493,298 @@ static void test_extension_search_rejects_excessive_directory_depth(void)
     destroy_fixture(&fixture);
 }
 
+static ios_u64 find_entry_identity(
+    struct ios_vfs_mount *mount,
+    ios_u64 directory_identity,
+    const char *display_base
+)
+{
+    struct ios_vfs_directory_entry entries[8];
+    ios_u64 continuation;
+    ios_size count;
+    IOS_TEST_ASSERT_STATUS(
+        vfs_enumerate(
+            mount, directory_identity, 0, entries, IOS_ARRAY_COUNT(entries),
+            &count, &continuation
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(continuation == 0);
+    for (ios_size index = 0; index < count; ++index) {
+        if (strcmp(entries[index].display_base_name, display_base) == 0) {
+            return entries[index].object_identity;
+        }
+    }
+    return 0;
+}
+
+static void test_vfs_identity_mutations_preserve_type_and_reject_stale_objects(void)
+{
+    struct fixture fixture;
+    struct ios_vfs_object docs;
+    ios_u8 bytes[32] = { 0 };
+    ios_u64 source_identity;
+    ios_u64 renamed_identity;
+    ios_size transferred;
+    bool complete;
+    initialize_fixture(&fixture);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/REPORT.TXT"), IOS_OK
+    );
+    source_identity = find_entry_identity(
+        &fixture.mount.vfs, IOS_VFS_ROOT_OBJECT_ID, "REPORT"
+    );
+    IOS_TEST_ASSERT(source_identity != 0);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_replace_object(&fixture.mount.vfs, source_identity, "hello", 5), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        vfs_append_object(&fixture.mount.vfs, source_identity, " world", 6), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        vfs_read_object(
+            &fixture.mount.vfs, source_identity, 6, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == 5);
+    IOS_TEST_ASSERT(memcmp(bytes, "world", 5) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_create_directory(&fixture.path, "/DOCS", &docs), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        vfs_rename_object(
+            &fixture.mount.vfs, source_identity, docs.identity, "SUMMARY", 7
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/DOCS/SUMMARY.TXT", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == 11);
+    IOS_TEST_ASSERT(memcmp(bytes, "hello world", 11) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_remove_object(&fixture.mount.vfs, source_identity),
+        IOS_ERROR(IOS_E_NOT_FOUND)
+    );
+    renamed_identity = find_entry_identity(&fixture.mount.vfs, docs.identity, "SUMMARY");
+    IOS_TEST_ASSERT(renamed_identity != 0 && renamed_identity != source_identity);
+    IOS_TEST_ASSERT_STATUS(
+        vfs_remove_object(&fixture.mount.vfs, renamed_identity), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/DOCS/SUMMARY.TXT", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_ERROR(IOS_E_NOT_FOUND)
+    );
+    destroy_fixture(&fixture);
+}
+
+static void test_display_safe_commands_use_real_vfs_and_filesystem_objects(void)
+{
+    static const ios_u8 binary_bytes[] = { 0, 1, 2, 3 };
+    static const ios_u8 image_bytes[] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n' };
+    struct fixture fixture;
+    struct ios_type_catalog catalog;
+    struct ios_file_view_service view;
+    struct ios_file_command_service commands;
+    struct text_output output = { 0 };
+    ios_type_icon_capability generic_capability;
+    ios_u8 bytes[16] = { 0 };
+    ios_u64 diagnostic_identity;
+    ios_size transferred;
+    bool complete;
+    initialize_fixture(&fixture);
+    IOS_TEST_ASSERT_STATUS(
+        ios_type_catalog_initialize(&catalog, UINT64_C(0x4453504c4159)), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_type_catalog_register(
+            &catalog, UINT64_MAX, IOS_ICON_GENERIC_FILE, &generic_capability
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_view_service_initialize(
+            &view, &fixture.mounts, &catalog, generic_capability
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_service_initialize(&commands, &view, &fixture.path), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/REPORT.TXT"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/JOURNAL.LOG"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/LETTER.DOC"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/PAYLOAD.BIN"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/IMAGE.PNG"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_replace(
+            &fixture.service, "/PAYLOAD.BIN", binary_bytes, sizeof(binary_bytes)
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_replace(
+            &fixture.service, "/IMAGE.PNG", image_bytes, sizeof(image_bytes)
+        ), IOS_OK
+    );
+    {
+        struct ios_vfs_object docs;
+        IOS_TEST_ASSERT_STATUS(
+            vfs_create_directory(&fixture.path, "/DOCS", &docs), IOS_OK
+        );
+    }
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "report", "hello", 5), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_append(&commands, "/REPORT", "!", 1), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_cat(&commands, "report", capture_text, &output), IOS_OK
+    );
+    IOS_TEST_ASSERT(strcmp(output.bytes, "hello!") == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "LETTER", "document", 8), IOS_OK
+    );
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_cat(&commands, "letter", capture_text, &output), IOS_OK
+    );
+    IOS_TEST_ASSERT(strcmp(output.bytes, "document") == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "/JOURNAL", "log", 3), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "/PAYLOAD", "bad", 3),
+        IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "IMAGE", "bad", 3),
+        IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_append(&commands, "IMAGE", "bad", 3),
+        IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_cat(&commands, "IMAGE", capture_text, &output),
+        IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    IOS_TEST_ASSERT(output.length == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_resolve_diagnostic(
+            &commands, "/REPORT", &diagnostic_identity
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(diagnostic_identity != 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_rename(&commands, "/REPORT", "/DOCS/SUMMARY"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/DOCS/SUMMARY.TXT", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == 6 && memcmp(bytes, "hello!", 6) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/JOURNAL.LOG", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == 3 && memcmp(bytes, "log", 3) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/PAYLOAD.BIN", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == sizeof(binary_bytes));
+    IOS_TEST_ASSERT(memcmp(bytes, binary_bytes, sizeof(binary_bytes)) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/IMAGE.PNG", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(complete && transferred == sizeof(image_bytes));
+    IOS_TEST_ASSERT(memcmp(bytes, image_bytes, sizeof(image_bytes)) == 0);
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_create(&fixture.service, "/DOCS/TAKEN.LOG"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_rename(&commands, "/DOCS/SUMMARY", "/DOCS/TAKEN"),
+        IOS_ERROR(IOS_E_ALREADY_EXISTS)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_rename(&commands, "/DOCS/SUMMARY", "/DOCS/BAD.NAME"),
+        IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(vfs_path_set_current(&fixture.path, "/DOCS"), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_write(&commands, "SUMMARY", "relative", 8),
+        IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_append(&commands, "SUMMARY", " relative", 9), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_rename(&commands, "SUMMARY", "FINAL"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_resolve_diagnostic(&commands, "FINAL", &diagnostic_identity), IOS_OK
+    );
+    fixture.mount.vfs.state = IOS_MOUNT_DIAGNOSTIC;
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_append(&commands, "FINAL", "bad", 3),
+        IOS_ERROR(IOS_E_READ_ONLY)
+    );
+    fixture.mount.vfs.state = IOS_MOUNT_RW;
+    IOS_TEST_ASSERT_STATUS(
+        ios_fs_file_service_read(
+            &fixture.service, "/DOCS/FINAL.TXT", 0, bytes, sizeof(bytes),
+            &transferred, &complete
+        ), IOS_OK
+    );
+    IOS_TEST_ASSERT(
+        complete && transferred == 15 && memcmp(bytes, "hello! relative", 15) == 0
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_remove(&commands, "FINAL"), IOS_OK
+    );
+    IOS_TEST_ASSERT_STATUS(
+        ios_file_command_resolve_diagnostic(
+            &commands, "FINAL", &diagnostic_identity
+        ), IOS_ERROR(IOS_E_NOT_FOUND)
+    );
+    destroy_fixture(&fixture);
+}
+
 const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_file_lifecycle_is_durable_and_preserves_companion_metadata),
+    IOS_TEST_CASE(test_visible_base_names_are_unique_across_types_and_directories),
     IOS_TEST_CASE(test_file_service_rejects_bad_names_and_read_only_mutation),
     IOS_TEST_CASE(test_directory_vfs_and_nested_file_commands_use_real_disk_records),
+    IOS_TEST_CASE(test_relative_create_keeps_all_files_in_current_directory),
     IOS_TEST_CASE(test_extension_search_returns_nested_extension_hidden_paths),
     IOS_TEST_CASE(test_extension_search_reports_capacity_truncation),
     IOS_TEST_CASE(test_extension_matcher_rejects_prefilter_collision_and_damage),
-    IOS_TEST_CASE(test_extension_search_rejects_excessive_directory_depth)
+    IOS_TEST_CASE(test_extension_search_rejects_excessive_directory_depth),
+    IOS_TEST_CASE(test_vfs_identity_mutations_preserve_type_and_reject_stale_objects),
+    IOS_TEST_CASE(test_display_safe_commands_use_real_vfs_and_filesystem_objects)
 };
 
 const size_t ios_test_case_count = IOS_ARRAY_COUNT(ios_test_cases);

@@ -34,6 +34,7 @@ static const char *status_symbol(ios_status status)
     case IOS_ERROR(IOS_E_NOT_EMPTY): return "not_empty";
     case IOS_ERROR(IOS_E_PROTOCOL): return "protocol_error";
     case IOS_ERROR(IOS_E_INVALID_STATE): return "invalid_state";
+    case IOS_ERROR(IOS_E_UNEXPECTED_FORMAT): return "unexpected_format";
     default: return "command_failed";
     }
 }
@@ -53,6 +54,7 @@ static const char *status_message(ios_status status)
     case IOS_ERROR(IOS_E_READ_ONLY): return "filesystem is read-only";
     case IOS_ERROR(IOS_E_NOT_EMPTY): return "directory is not empty";
     case IOS_ERROR(IOS_E_INVALID_STATE): return "required service or mount is unavailable";
+    case IOS_ERROR(IOS_E_UNEXPECTED_FORMAT): return "file is not in the expected text format";
     default: return "command rejected";
     }
 }

@@ -31,6 +31,20 @@ static const struct ios_cui_command write_command = {
     "write", "record a test write", "write <path> \"<text>\"", record_command
 };
 
+static ios_status reject_format_command(
+    ios_size count, const char *const *arguments, struct ios_cui_io *io
+)
+{
+    (void)count;
+    (void)arguments;
+    (void)io;
+    return IOS_ERROR(IOS_E_UNEXPECTED_FORMAT);
+}
+
+static const struct ios_cui_command format_command = {
+    "formatfail", "reject a non-text file", "formatfail", reject_format_command
+};
+
 static void test_payload_boundary_and_deterministic_grammar(void)
 {
     char maximum[IOS_CUI_MAX_PAYLOAD + 1];
@@ -110,6 +124,7 @@ static void test_console_edits_reports_errors_and_recovers_prompt(void)
     struct ios_cui_io io = { capture_output, &output, NULL, NULL, NULL };
     ios_cui_command_registry_initialize(&registry);
     IOS_TEST_ASSERT_STATUS(ios_cui_register_core_commands(&registry), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(ios_cui_command_register(&registry, &format_command), IOS_OK);
     IOS_TEST_ASSERT_STATUS(ios_cui_console_initialize(&console, &registry, io), IOS_OK);
     ios_cui_console_prompt(&console);
     for (const char *input = "helx"; *input != '\0'; ++input) {
@@ -137,6 +152,16 @@ static void test_console_edits_reports_errors_and_recovers_prompt(void)
         "error: invalid_arguments: check command syntax with help\n"
     ) != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "usage: version\n") != NULL);
+    for (const char *input = "formatfail"; *input != '\0'; ++input) {
+        IOS_TEST_ASSERT_STATUS(ios_cui_console_feed(&console, (ios_u8)*input), IOS_OK);
+    }
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_console_feed(&console, '\n'), IOS_ERROR(IOS_E_UNEXPECTED_FORMAT)
+    );
+    IOS_TEST_ASSERT(strstr(
+        output.bytes,
+        "error: unexpected_format: file is not in the expected text format\n"
+    ) != NULL);
     IOS_TEST_ASSERT(console.line_length == 0 && *console.line == '\0');
 }
 

@@ -29,6 +29,16 @@ attachment-order, input/display, and power qualification still need retained Hyp
 - Maximum file size is 4 GiB minus one byte. Sparse guest files are not supported in version 1.
 - The current CUI file service bounds each file operation to 256 clusters (1 MiB); the on-disk
   format's larger theoretical file-size field is not yet exposed through this console backend.
+- `write` and `append` are character-oriented and do not use extension/type allowlists. `write`
+  initializes an existing empty file or creates a missing extensionless file. `append` scans all
+  existing content before mutation. Supported
+  text is printable ASCII plus tab, carriage return, and line feed; other bytes are rejected as
+  `unexpected_format`. An empty file has no content evidence and is therefore treated as text
+  regardless of its hidden extension. No Unicode or general binary editor is included.
+- Extension-hidden collision suffixes such as `REPORT (2)` describe the current complete directory
+  view on legacy or externally produced media. A separate delete or move can renumber them, so users
+  must refresh `dir` before reusing a numeric collision label. New create and rename operations
+  reject an occupied displayed base regardless of extension or object kind.
 - Version 1 has no journal, snapshots, encryption, compression, or automatic repair.
 - Corruption can result in diagnostic read-only access or a rejected mount. The system does not
   silently repair unsafe metadata or promise recovery of damaged data.

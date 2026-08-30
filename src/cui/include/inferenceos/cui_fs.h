@@ -34,10 +34,16 @@ struct ios_cui_file_operations {
     );
     ios_status (*rename)(void *context, const char *source, const char *destination);
     ios_status (*remove)(void *context, const char *path);
+    ios_status (*cat)(
+        void *context, const char *path, ios_cui_write output, void *output_context
+    );
 };
 
 typedef ios_status (*ios_cui_diagnostic_object_resolver)(
-    void *context, const char *path, ios_u64 *object_identity
+    void *context,
+    enum ios_fs_diagnostic_query query,
+    const char *path,
+    ios_u64 *object_identity
 );
 
 struct ios_cui_diagnostic_binding {

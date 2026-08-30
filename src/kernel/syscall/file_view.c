@@ -97,7 +97,9 @@ ios_status ios_file_view_service_initialize(
         return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
     }
     *service = (struct ios_file_view_service){
-        mount_registry, type_catalog, generic_file_capability
+        .mount_registry = mount_registry,
+        .type_catalog = type_catalog,
+        .generic_file_capability = generic_file_capability
     };
     return IOS_OK;
 }
@@ -160,5 +162,199 @@ ios_status ios_file_view_dispatch(
         if (IOS_FAILED(status)) return status;
         ++reply->item_count;
     }
+    return IOS_OK;
+}
+
+static ios_status snapshot_directory(
+    struct ios_file_view_service *service,
+    struct ios_vfs_mount *mount,
+    ios_u64 directory_identity,
+    ios_size *entry_count
+)
+{
+    ios_u64 continuation;
+    ios_status status;
+    if (service == NULL || mount == NULL || entry_count == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    *entry_count = 0;
+    memset(service->candidates, 0, sizeof(service->candidates));
+    memset(service->display_entries, 0, sizeof(service->display_entries));
+    status = vfs_enumerate(
+        mount, directory_identity, 0, service->candidates,
+        IOS_FILE_VIEW_DIRECTORY_CAPACITY, entry_count, &continuation
+    );
+    if (IOS_FAILED(status)) return status;
+    if (*entry_count > IOS_FILE_VIEW_DIRECTORY_CAPACITY) {
+        *entry_count = 0;
+        return IOS_ERROR(IOS_E_PROTOCOL);
+    }
+    if (continuation != 0) {
+        *entry_count = 0;
+        return IOS_ERROR(IOS_E_NO_SPACE);
+    }
+    for (ios_size index = 0; index < *entry_count; ++index) {
+        status = validate_vfs_entry(&service->candidates[index]);
+        if (IOS_FAILED(status)) {
+            *entry_count = 0;
+            return status;
+        }
+        status = make_safe_entry(
+            service, &service->candidates[index], IOS_INVALID_TYPE_ICON_CAPABILITY,
+            &service->display_entries[index]
+        );
+        if (IOS_FAILED(status)) {
+            *entry_count = 0;
+            return status;
+        }
+    }
+    status = ios_display_safe_entries_disambiguate(
+        service->display_entries, *entry_count,
+        service->disambiguation_workspace, IOS_FILE_VIEW_DIRECTORY_CAPACITY
+    );
+    if (IOS_FAILED(status)) *entry_count = 0;
+    return status;
+}
+
+static bool display_component_equal(
+    const char *left,
+    ios_size left_length,
+    const char *right,
+    ios_size right_length
+)
+{
+    if (left == NULL || right == NULL || left_length != right_length) return false;
+    for (ios_size index = 0; index < left_length; ++index) {
+        unsigned char left_byte = (unsigned char)left[index];
+        unsigned char right_byte = (unsigned char)right[index];
+        if (left_byte >= 'a' && left_byte <= 'z') left_byte -= 'a' - 'A';
+        if (right_byte >= 'a' && right_byte <= 'z') right_byte -= 'a' - 'A';
+        if (left_byte != right_byte) return false;
+    }
+    return true;
+}
+
+static ios_status resolve_normalized_display_path(
+    struct ios_file_view_service *service,
+    struct ios_vfs_mount *mount,
+    const char normalized[IOS_VFS_PATH_CAPACITY],
+    struct ios_file_view_resolved_object *resolved
+)
+{
+    ios_u64 current = mount->root->identity;
+    ios_size cursor = 1;
+    if (normalized[1] == '\0') {
+        *resolved = (struct ios_file_view_resolved_object){
+            .mount = mount,
+            .object_identity = current,
+            .parent_identity = current,
+            .allowed_operations = IOS_VFS_FILE_OPEN | IOS_VFS_FILE_READ
+                | IOS_VFS_FILE_ENUMERATE,
+            .kind = IOS_VFS_OBJECT_DIRECTORY
+        };
+        return IOS_OK;
+    }
+    while (normalized[cursor] != '\0') {
+        ios_size begin = cursor;
+        ios_size component_length;
+        ios_size entry_count;
+        ios_size selected = SIZE_MAX;
+        ios_status status;
+        while (normalized[cursor] != '\0' && normalized[cursor] != '/') ++cursor;
+        component_length = cursor - begin;
+        status = snapshot_directory(service, mount, current, &entry_count);
+        if (IOS_FAILED(status)) return status;
+        for (ios_size index = 0; index < entry_count; ++index) {
+            const struct ios_display_safe_entry *entry = &service->display_entries[index];
+            if (display_component_equal(
+                    entry->display_name, entry->display_name_length,
+                    normalized + begin, component_length
+                )) {
+                if (selected != SIZE_MAX) return IOS_ERROR(IOS_E_CORRUPT);
+                selected = index;
+            }
+        }
+        if (selected == SIZE_MAX) return IOS_ERROR(IOS_E_NOT_FOUND);
+        const struct ios_vfs_directory_entry *candidate = &service->candidates[selected];
+        *resolved = (struct ios_file_view_resolved_object){
+            .mount = mount,
+            .object_identity = candidate->object_identity,
+            .parent_identity = current,
+            .internal_type_identity = candidate->internal_type_identity,
+            .byte_size = candidate->byte_size,
+            .allowed_operations = candidate->allowed_operations,
+            .generic_attributes = candidate->generic_attributes,
+            .kind = candidate->kind
+        };
+        if (normalized[cursor] == '/') {
+            if (candidate->kind != IOS_VFS_OBJECT_DIRECTORY) {
+                return IOS_ERROR(IOS_E_NOT_FOUND);
+            }
+            current = candidate->object_identity;
+            ++cursor;
+        }
+    }
+    return IOS_OK;
+}
+
+ios_status ios_file_view_resolve_display_path(
+    struct ios_file_view_service *service,
+    const struct ios_vfs_path_context *path_context,
+    const char *path,
+    struct ios_file_view_resolved_object *resolved
+)
+{
+    char normalized[IOS_VFS_PATH_CAPACITY];
+    struct ios_vfs_mount *mount;
+    ios_status status;
+    if (resolved == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    memset(resolved, 0, sizeof(*resolved));
+    if (service == NULL || path_context == NULL || path == NULL
+        || service->mount_registry == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    mount = vfs_root_mount(service->mount_registry);
+    if (mount == NULL || path_context->mount != mount
+        || path_context->mount_generation != mount->generation) {
+        return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    status = vfs_path_normalize(
+        path_context->current_directory, path, normalized, sizeof(normalized)
+    );
+    if (IOS_FAILED(status)) return status;
+    status = resolve_normalized_display_path(service, mount, normalized, resolved);
+    if (IOS_FAILED(status)) memset(resolved, 0, sizeof(*resolved));
+    return status;
+}
+
+ios_status ios_file_view_list_directory_path(
+    struct ios_file_view_service *service,
+    const struct ios_vfs_path_context *path_context,
+    const char *path,
+    struct ios_display_safe_entry *entries,
+    ios_size capacity,
+    ios_size *entry_count
+)
+{
+    struct ios_vfs_object directory;
+    ios_size count;
+    ios_status status;
+    if (entries == NULL || capacity == 0 || entry_count == NULL) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    *entry_count = 0;
+    if (service == NULL || path_context == NULL || path == NULL
+        || service->mount_registry == NULL
+        || path_context->mount != vfs_root_mount(service->mount_registry)) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = vfs_path_resolve(path_context, path, &directory);
+    if (IOS_FAILED(status)) return status;
+    if (directory.kind != IOS_VFS_OBJECT_DIRECTORY) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = snapshot_directory(service, path_context->mount, directory.identity, &count);
+    if (IOS_FAILED(status)) return status;
+    if (count > capacity) return IOS_ERROR(IOS_E_NO_SPACE);
+    memcpy(entries, service->display_entries, count * sizeof(*entries));
+    *entry_count = count;
     return IOS_OK;
 }

@@ -72,6 +72,38 @@ ios_status ios_fs_file_service_rename(
 ios_status ios_fs_file_service_remove(
     struct ios_fs_file_service *service, const char *name
 );
+ios_status ios_fs_file_service_replace_object(
+    void *context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+ios_status ios_fs_file_service_append_object(
+    void *context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+);
+ios_status ios_fs_file_service_read_object(
+    void *context,
+    ios_u64 object_identity,
+    ios_u64 offset,
+    void *buffer,
+    ios_size capacity,
+    ios_size *transferred,
+    bool *complete
+);
+ios_status ios_fs_file_service_rename_object(
+    void *context,
+    ios_u64 object_identity,
+    ios_u64 destination_parent_identity,
+    const char *destination_base,
+    ios_size destination_base_length
+);
+ios_status ios_fs_file_service_remove_object(
+    void *context,
+    ios_u64 object_identity
+);
 
 /* VFS callbacks installed on the mounted InferenceOS-FS volume. */
 ios_status ios_fs_file_service_enumerate(
@@ -91,6 +123,13 @@ ios_status ios_fs_file_service_lookup(
     struct ios_vfs_object *object
 );
 ios_status ios_fs_file_service_create_directory(
+    void *context,
+    ios_u64 parent_identity,
+    const char *component,
+    ios_size component_length,
+    struct ios_vfs_object *object
+);
+ios_status ios_fs_file_service_create_file(
     void *context,
     ios_u64 parent_identity,
     const char *component,

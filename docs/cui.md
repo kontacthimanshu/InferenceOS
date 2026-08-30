@@ -21,8 +21,8 @@ at most 32 arguments. Arguments are separated by spaces. Double quotes group spa
 argument, and only `\"` and `\\` escapes are recognized inside quotes.
 
 ```text
-write /DOCS/REPORT.TXT "persistent data"
-append /DOCS/REPORT.TXT " and more"
+write /DOCS/REPORT "persistent data"
+append /DOCS/REPORT " and more"
 ```
 
 Pipes, redirection, expansion, globbing, scripting, and command chaining are deliberately absent.
@@ -38,9 +38,10 @@ error: <symbol>: <message>
 A parse failure is reported with symbols such as `line_too_long`, `invalid_character`,
 `invalid_syntax`, or `too_many_arguments`. Unknown commands use `command_not_found`; handler
 failures identify their cause, such as `invalid_arguments`, `not_found`, `already_exists`,
-`read_only`, or `not_empty`. After an error, the console clears the current line and prints a new
+`unexpected_format`, `read_only`, or `not_empty`. After an error, the console clears the current line and prints a new
 prompt. When a known command has invalid arguments, the next line prints its exact syntax. For
-example, `fileinfo` alone reports `invalid_arguments` followed by `usage: fileinfo <path>`.
+example, `fileinfo` alone reports `invalid_arguments` followed by
+`usage: fileinfo <display-path>`.
 
 ## Core and interface commands
 
@@ -83,16 +84,41 @@ The detailed version-1 disk format and mount classifications are in
 | Syntax | Purpose |
 |---|---|
 | `create <path>` | Create an empty regular file. |
-| `write <path> <text>` | Replace the file content with the supplied argument bytes. |
-| `append <path> <text>` | Append the supplied argument bytes. |
+| `write <display-path> <text>` | Initialize an empty regular file with supported text using the extension-hidden name shown by `dir`. |
+| `append <display-path> <text>` | Append supported text to an empty or content-validated text file using the extension-hidden name shown by `dir`. |
+| `cat <display-path>` | Display a content-validated text file using its extension-hidden name. |
 | `type <path>` | Write file content to the console. |
-| `rename <source> <destination>` | Rename a regular file; an extension change recomputes companion metadata before commit. |
-| `delete <path>` | Delete a regular file through the ordered filesystem transaction. |
+| `rename <display-source> <display-destination>` | Rename or move a displayed regular file while preserving its hidden authoritative extension. |
+| `delete <display-path>` | Delete the exact displayed regular file through the ordered filesystem transaction. |
 | `search <extension>` | Recursively list files with the exact extension. Accepts `DOC` or `.DOC` case-insensitively and prints extension-hidden absolute locations. |
 
-Quoted input is needed when `write` or `append` content contains spaces. Version 1 does not provide
-redirection, stdin streams, or binary escape syntax; these commands pass the parsed argument bytes
-to the shared file-operation interface.
+`write`, `append`, `cat`, `rename`, and `delete` resolve extension-hidden paths exactly as rendered by
+`dir`, with ASCII case-insensitive matching consistent with canonical 8.3 names. Older or externally
+produced disks may already contain a collision label; one containing
+spaces must be quoted, for example
+`write "/DOCS/REPORT (2)" "second"`. The labels are ranked by object identity for the current
+complete directory view; after a separate namespace change, run `dir` again before using a numeric
+label. New creates and renames reject any file or directory whose extension-hidden base already
+exists, so normal CUI mutations cannot introduce another collision. The implementation never
+guesses a hidden extension or bypasses the VFS.
+
+Quoted input is also needed when `write` or `append` content contains spaces. Neither command uses
+the hidden extension as an allowlist. `write` initializes an existing empty file; when the displayed
+name does not exist, it creates an empty extensionless file at that path and initializes it in the
+same command. If creation discovers that the displayed base already exists after an initial lookup
+miss, `write` retries trusted resolution instead of returning `already_exists`. `append` accepts an
+existing empty target or scans all existing bytes before mutation.
+The current CUI text encoding
+is printable ASCII plus tab, carriage return, and line feed; any other byte, or any attempt to
+`write` a non-empty file, returns `unexpected_format` without mutation. Thus an empty file may be
+initialized regardless of its hidden extension, while an existing image or other binary file is
+rejected by content. Version 1 does not provide redirection, stdin streams, Unicode input, or binary
+escape syntax.
+
+`cat` applies the same content-based text policy without consulting a hidden extension or embedded
+file-type allowlist. It validates the complete file before displaying content, so `cat REPORT`
+can read `REPORT.TXT` or `REPORT.DOC`, while binary content returns `unexpected_format` without
+printing a partial prefix. `cat` is read-only and never creates or modifies a file.
 
 `search` sends the extension through the shell-facing kernel service; the CUI never receives the
 computed hash or raw directory metadata. InferenceOS-FS uses the companion hash only to prefilter
@@ -114,13 +140,17 @@ error path.
 
 Absolute and relative paths are supported. `.` names the current directory, `..` names its parent,
 and resolving `..` at `/` remains at `/`. Paths are limited to 255 bytes and 16 components.
+Relative `create` and `mkdir` operands are bound to the current directory's resolved VFS identity;
+the filesystem does not re-resolve them from root. Consequently, files created after `cd /TEST`
+are listed by `dir .` in `/TEST`, not by `dir /`.
 Persistent names follow the version-1 uppercase 8.3 rules described in
 [InferenceOS-FS](inferenceos-fs.md#names-and-primary-directory-records).
 
 Ordinary `dir` output comes from the display-safe model. It shows extension-free names, object kind,
 permitted size, and a generic read-only flag. It never exposes extensions, extension hashes,
-companions, FAT chains, record locations, or registry entries. Hidden-name collisions remain
-independently selectable through deterministic labels such as `REPORT` and `REPORT (2)`.
+companions, FAT chains, record locations, or registry entries. Legacy hidden-name collisions remain
+independently selectable through deterministic labels such as `REPORT` and `REPORT (2)`, but new
+filesystem mutations enforce a unique displayed base name within each directory.
 
 ## Privileged diagnostic commands
 
@@ -130,9 +160,9 @@ ordinary file/application interface.
 | Syntax | Diagnostic information |
 |---|---|
 | `fsinfo` | With diagnostic authority, adds authoritative free-space, layout, hash, mount, and registry health fields. |
-| `fileinfo <path>` | Internal canonical name, object type, attributes, size, first cluster, and primary/companion locations. |
-| `hashinfo <path>` | Canonical extension, FNV-1a hash values, companion version/commit state, checksum, CRC, and validation result. |
-| `fatinfo <path>` | A bounded, validated cluster chain and end-of-chain state. |
+| `fileinfo <display-path>` | Resolve the displayed file, then show its internal canonical name, object type, attributes, size, first cluster, and primary/companion locations. |
+| `hashinfo <display-or-canonical-path>` | Resolve a displayed name (with canonical-path fallback), then show its extension, FNV-1a hash values, companion version/commit state, checksum, CRC, and validation result. |
+| `fatinfo <display-or-canonical-path>` | Resolve a displayed name (with canonical-path fallback), then show a bounded, validated cluster chain and end-of-chain state. |
 
 Diagnostic reads remain bounded by validated filesystem geometry. A capability may restrict the
 available diagnostic scopes; absent, stale, wrong-process, or insufficient authority is rejected.
@@ -147,18 +177,26 @@ format disk0
 mount disk0 /
 mkdir /DOCS
 create /DOCS/REPORT.TXT
-write /DOCS/REPORT.TXT "persistent data"
+write /DOCS/REPORT "persistent data"
+append /DOCS/REPORT " and more"
+cat /DOCS/REPORT
+fileinfo /DOCS/REPORT
 dir /DOCS
 type /DOCS/REPORT.TXT
 sync
-hashinfo /DOCS/REPORT.TXT
+hashinfo /DOCS/REPORT
+fatinfo /DOCS/REPORT
 gui
 shutdown
 ```
 
-Ordinary `dir /DOCS` displays `REPORT`, not `REPORT.TXT`; `hashinfo` reveals the extension and hash
-only because it is the explicit privileged diagnostic path. The standalone console and GUI
-terminal observe the same mounted namespace.
+Ordinary `dir /DOCS` displays `REPORT`, not `REPORT.TXT`. The eight display-oriented commands are
+`write`, `append`, `cat`, `rename`, `delete`, `fileinfo`, `hashinfo`, and `fatinfo`; `create` and `type`
+continue to accept their existing canonical typed paths. `hashinfo` and `fatinfo` also retain canonical-path
+fallback for privileged diagnosis of files that cannot enter the healthy displayed view.
+`hashinfo` reveals the extension and hash only because it is
+an explicit privileged diagnostic path. The standalone console and GUI terminal observe the same
+mounted namespace.
 
 ## Implementation and validation references
 

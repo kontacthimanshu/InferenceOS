@@ -119,6 +119,8 @@ shutdown.
 
 ## File Explorer
 
+The managed File Explorer window is titled `File Explorer`.
+
 File Explorer is split into independently testable layers:
 
 | Layer | Responsibility |

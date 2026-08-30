@@ -89,6 +89,11 @@ This rebuilds the current source, replaces the VM and boot VHDX, then reattaches
 incompatible size or logical sector size, is not attached exactly once, or the VM has checkpoints.
 Omit `-PreserveDataDisk` only when a new blank data disk is intended.
 
+The recreation wrapper sources the default WSL tool environment at
+`$HOME/.local/share/inferenceos/tools/environment.sh` before configuring CMake. If the bootstrap
+used a custom environment-file location, pass its absolute Linux path with
+`-WslToolEnvironmentFile /path/to/environment.sh`.
+
 ## Disk safety and persistence validation
 
 The loader passes the GPT identity of its EFI partition to the kernel. StorVSC probes SCSI LUNs,
@@ -102,7 +107,10 @@ In the CUI, exercise the data disk:
 devices
 format disk0
 mount disk0 /
-write /HYPERV.TXT "persistent Hyper-V data"
+create /HYPERV.TXT
+write /HYPERV "persistent Hyper-V data"
+append /HYPERV " and more"
+fileinfo /HYPERV
 sync
 reboot
 type /HYPERV.TXT

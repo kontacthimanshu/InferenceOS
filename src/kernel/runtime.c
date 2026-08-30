@@ -11,6 +11,7 @@
 #include <inferenceos/drivers/hyperv/platform.h>
 #include <inferenceos/drivers/serial.h>
 #include <inferenceos/doc_viewer.h>
+#include <inferenceos/file_command.h>
 #include <inferenceos/file_view.h>
 #include <inferenceos/extension_search.h>
 #include <inferenceos/fs/file_service.h>
@@ -87,6 +88,7 @@ struct ios_kernel_runtime_state {
     struct ios_application_binding_registry bindings;
     struct ios_type_capability_service type_capabilities;
     struct ios_file_view_service file_view;
+    struct ios_file_command_service file_commands;
     struct ios_extension_search_service extension_search;
     struct ios_gui_view_service gui_view;
     struct ios_shell_service shell_service;
@@ -519,33 +521,67 @@ static ios_status test_action_cui_command_audit(
     struct ios_kernel_runtime_state *state
 )
 {
-    static const char *const commands[] = {
-        "pwd",
-        "devices",
-        "diskinfo disk0",
-        "fsinfo",
-        "mkdir /CMDTEST",
-        "cd /CMDTEST",
-        "create NOTE.TXT",
-        "write NOTE.TXT \"all commands\"",
-        "append NOTE.TXT \" work\"",
-        "type NOTE.TXT",
-        "dir .",
-        "rename NOTE.TXT FINAL.TXT",
-        "search .txt",
-        "fileinfo FINAL.TXT",
-        "hashinfo FINAL.TXT",
-        "fatinfo FINAL.TXT",
-        "sync",
-        "delete FINAL.TXT",
-        "cd /",
-        "rmdir /CMDTEST",
-        "unmount /",
-        "mount disk0 /",
-        "fsinfo",
-        "help",
-        "version",
-        "clear"
+    static const struct {
+        const char *text;
+        ios_status expected;
+    } commands[] = {
+        { "pwd", IOS_OK },
+        { "devices", IOS_OK },
+        { "diskinfo disk0", IOS_OK },
+        { "fsinfo", IOS_OK },
+        { "mkdir /CMDTEST", IOS_OK },
+        { "cd /CMDTEST", IOS_OK },
+        { "create LOC1.TXT", IOS_OK },
+        { "create LOC2.TXT", IOS_OK },
+        { "create LOC3.TXT", IOS_OK },
+        { "create LOC4.TXT", IOS_OK },
+        { "create LOC5.TXT", IOS_OK },
+        { "create LOC6.TXT", IOS_OK },
+        { "create LOC7.TXT", IOS_OK },
+        { "create LOC8.TXT", IOS_OK },
+        { "dir .", IOS_OK },
+        { "delete LOC1", IOS_OK },
+        { "delete LOC2", IOS_OK },
+        { "delete LOC3", IOS_OK },
+        { "delete LOC4", IOS_OK },
+        { "delete LOC5", IOS_OK },
+        { "delete LOC6", IOS_OK },
+        { "delete LOC7", IOS_OK },
+        { "delete LOC8", IOS_OK },
+        { "create file1.txt", IOS_OK },
+        { "write file1 \"Hello World\"", IOS_OK },
+        { "create FILE1.LOG", IOS_ERROR(IOS_E_ALREADY_EXISTS) },
+        { "mkdir FILE1", IOS_ERROR(IOS_E_ALREADY_EXISTS) },
+        { "append file1 \"!\"", IOS_OK },
+        { "cat FILE1", IOS_OK },
+        { "type FILE1.TXT", IOS_OK },
+        { "create NOTE.TXT", IOS_OK },
+        { "rename NOTE FILE1", IOS_ERROR(IOS_E_ALREADY_EXISTS) },
+        { "delete file1", IOS_OK },
+        { "write AUTO \"created by write\"", IOS_OK },
+        { "delete AUTO", IOS_OK },
+        { "write NOTE \"all commands\"", IOS_OK },
+        { "append NOTE \" work\"", IOS_OK },
+        { "cat note", IOS_OK },
+        { "type NOTE.TXT", IOS_OK },
+        { "dir .", IOS_OK },
+        { "rename NOTE FINAL", IOS_OK },
+        { "search .txt", IOS_OK },
+        { "fileinfo FINAL", IOS_OK },
+        { "hashinfo FINAL", IOS_OK },
+        { "hashinfo FINAL.TXT", IOS_OK },
+        { "fatinfo FINAL", IOS_OK },
+        { "fatinfo FINAL.TXT", IOS_OK },
+        { "sync", IOS_OK },
+        { "delete FINAL", IOS_OK },
+        { "cd /", IOS_OK },
+        { "rmdir /CMDTEST", IOS_OK },
+        { "unmount /", IOS_OK },
+        { "mount disk0 /", IOS_OK },
+        { "fsinfo", IOS_OK },
+        { "help", IOS_OK },
+        { "version", IOS_OK },
+        { "clear", IOS_OK }
     };
     ios_status status;
 
@@ -558,16 +594,36 @@ static ios_status test_action_cui_command_audit(
     }
     /* A retained QEMU test disk may contain a failed prior audit. Clean only
      * the audit namespace and leave all unrelated user/test data untouched. */
-    status = test_dispatch_cui(state, "delete /CMDTEST/FINAL.TXT");
+    status = test_dispatch_cui(state, "delete /CMDTEST/FINAL");
     if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
-    status = test_dispatch_cui(state, "delete /CMDTEST/NOTE.TXT");
+    status = test_dispatch_cui(state, "delete /CMDTEST/NOTE");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/FILE1");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/AUTO");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC1");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC2");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC3");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC4");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC5");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC6");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC7");
+    if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = test_dispatch_cui(state, "delete /CMDTEST/LOC8");
     if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
     status = test_dispatch_cui(state, "rmdir /CMDTEST");
     if (IOS_FAILED(status) && status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
 
     for (ios_size index = 0; index < IOS_ARRAY_COUNT(commands); ++index) {
-        status = test_dispatch_cui(state, commands[index]);
-        if (IOS_FAILED(status)) return status;
+        status = test_dispatch_cui(state, commands[index].text);
+        if (status != commands[index].expected) return IOS_ERROR(IOS_E_PROTOCOL);
     }
     serial_write_line("INFERENCEOS:CUI_COMMAND_AUDIT_PASS");
     return IOS_OK;
@@ -797,7 +853,10 @@ static ios_status filesystem_snapshot(
 }
 
 static ios_status resolve_diagnostic_object(
-    void *context, const char *path, ios_u64 *object_identity
+    void *context,
+    enum ios_fs_diagnostic_query query,
+    const char *path,
+    ios_u64 *object_identity
 )
 {
     struct ios_kernel_runtime_state *state = context;
@@ -806,6 +865,17 @@ static ios_status resolve_diagnostic_object(
 
     if (state == NULL || !state->path_ready || object_identity == NULL) {
         return IOS_ERROR(IOS_E_INVALID_STATE);
+    }
+    if (query == IOS_FS_DIAGNOSTIC_QUERY_FILE
+        || query == IOS_FS_DIAGNOSTIC_QUERY_HASH
+        || query == IOS_FS_DIAGNOSTIC_QUERY_FAT) {
+        status = ios_file_command_resolve_diagnostic(
+            &state->file_commands, path, object_identity
+        );
+        if (IOS_SUCCEEDED(status) || query == IOS_FS_DIAGNOSTIC_QUERY_FILE
+            || status != IOS_ERROR(IOS_E_NOT_FOUND)) {
+            return status;
+        }
     }
     status = vfs_path_resolve(&state->path, path, &object);
     if (IOS_SUCCEEDED(status)) *object_identity = object.identity;
@@ -857,14 +927,9 @@ static ios_status runtime_mount_ready(void *context, struct ios_fs_mount *mount)
 static ios_status runtime_file_create(void *context, const char *path)
 {
     struct ios_kernel_runtime_state *state = context;
-    char normalized[IOS_VFS_PATH_CAPACITY];
-    ios_status status;
+    struct ios_vfs_object object;
     if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
-    status = vfs_path_normalize(
-        state->path.current_directory, path, normalized, sizeof(normalized)
-    );
-    return IOS_FAILED(status) ? status
-        : ios_fs_file_service_create(&state->file_service, normalized);
+    return vfs_create_file(&state->path, path, &object);
 }
 
 static ios_status runtime_file_write(
@@ -872,14 +937,9 @@ static ios_status runtime_file_write(
 )
 {
     struct ios_kernel_runtime_state *state = context;
-    char normalized[IOS_VFS_PATH_CAPACITY];
-    ios_status status;
-    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
-    status = vfs_path_normalize(
-        state->path.current_directory, path, normalized, sizeof(normalized)
-    );
-    return IOS_FAILED(status) ? status
-        : ios_fs_file_service_replace(&state->file_service, normalized, bytes, length);
+    return state != NULL && state->path_ready
+        ? ios_file_command_write(&state->file_commands, path, bytes, length)
+        : IOS_ERROR(IOS_E_INVALID_STATE);
 }
 
 static ios_status runtime_file_append(
@@ -887,14 +947,9 @@ static ios_status runtime_file_append(
 )
 {
     struct ios_kernel_runtime_state *state = context;
-    char normalized[IOS_VFS_PATH_CAPACITY];
-    ios_status status;
-    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
-    status = vfs_path_normalize(
-        state->path.current_directory, path, normalized, sizeof(normalized)
-    );
-    return IOS_FAILED(status) ? status
-        : ios_fs_file_service_append(&state->file_service, normalized, bytes, length);
+    return state != NULL && state->path_ready
+        ? ios_file_command_append(&state->file_commands, path, bytes, length)
+        : IOS_ERROR(IOS_E_INVALID_STATE);
 }
 
 static ios_status runtime_file_type(
@@ -934,35 +989,29 @@ static ios_status runtime_file_rename(
 )
 {
     struct ios_kernel_runtime_state *state = context;
-    char normalized_source[IOS_VFS_PATH_CAPACITY];
-    char normalized_destination[IOS_VFS_PATH_CAPACITY];
-    ios_status status;
-    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
-    status = vfs_path_normalize(
-        state->path.current_directory, source,
-        normalized_source, sizeof(normalized_source)
-    );
-    if (IOS_FAILED(status)) return status;
-    status = vfs_path_normalize(
-        state->path.current_directory, destination,
-        normalized_destination, sizeof(normalized_destination)
-    );
-    return IOS_FAILED(status) ? status : ios_fs_file_service_rename(
-        &state->file_service, normalized_source, normalized_destination
-    );
+    return state != NULL && state->path_ready
+        ? ios_file_command_rename(&state->file_commands, source, destination)
+        : IOS_ERROR(IOS_E_INVALID_STATE);
 }
 
 static ios_status runtime_file_remove(void *context, const char *path)
 {
     struct ios_kernel_runtime_state *state = context;
-    char normalized[IOS_VFS_PATH_CAPACITY];
-    ios_status status;
-    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
-    status = vfs_path_normalize(
-        state->path.current_directory, path, normalized, sizeof(normalized)
-    );
-    return IOS_FAILED(status) ? status
-        : ios_fs_file_service_remove(&state->file_service, normalized);
+    return state != NULL && state->path_ready
+        ? ios_file_command_remove(&state->file_commands, path)
+        : IOS_ERROR(IOS_E_INVALID_STATE);
+}
+
+static ios_status runtime_file_cat(
+    void *context, const char *path, ios_cui_write output, void *output_context
+)
+{
+    struct ios_kernel_runtime_state *state = context;
+    return state != NULL && state->path_ready
+        ? ios_file_command_cat(
+            &state->file_commands, path, output, output_context
+        )
+        : IOS_ERROR(IOS_E_INVALID_STATE);
 }
 
 static ios_status directory_enumerate(
@@ -974,36 +1023,10 @@ static ios_status directory_enumerate(
 )
 {
     struct ios_kernel_runtime_state *state = context;
-    struct ios_vfs_directory_entry source[IOS_SHELL_FILE_VIEW_REPLY_CAPACITY];
-    ios_u64 continuation;
-    ios_size count;
-    ios_status status;
-
-    if (state == NULL || !state->path_ready || capacity == 0 || entries == NULL
-        || entry_count == NULL) return IOS_ERROR(IOS_E_INVALID_STATE);
-    if (capacity > IOS_ARRAY_COUNT(source)) capacity = IOS_ARRAY_COUNT(source);
-    status = vfs_list_directory(
-        &state->path, path, 0, source, capacity, &count, &continuation
+    if (state == NULL || !state->path_ready) return IOS_ERROR(IOS_E_INVALID_STATE);
+    return ios_file_view_list_directory_path(
+        &state->file_view, &state->path, path, entries, capacity, entry_count
     );
-    if (IOS_FAILED(status)) return status;
-    for (ios_size index = 0; index < count; ++index) {
-        const struct ios_display_safe_source_entry safe = {
-            .base_name = source[index].display_base_name,
-            .object_handle = source[index].object_identity,
-            .type_icon_capability = source[index].kind == IOS_VFS_OBJECT_DIRECTORY
-                ? IOS_INVALID_TYPE_ICON_CAPABILITY : state->generic_file_capability,
-            .byte_size = source[index].byte_size,
-            .allowed_operations = source[index].allowed_operations,
-            .generic_attributes = source[index].generic_attributes,
-            .object_kind = source[index].kind == IOS_VFS_OBJECT_DIRECTORY
-                ? IOS_DISPLAY_SAFE_DIRECTORY : IOS_DISPLAY_SAFE_REGULAR_FILE
-        };
-        status = ios_display_safe_entry_convert(&safe, &entries[index]);
-        if (IOS_FAILED(status)) return status;
-    }
-    *entry_count = count;
-    (void)continuation;
-    return IOS_OK;
 }
 
 static ios_status directory_change_current(void *context, const char *path)
@@ -1418,6 +1441,10 @@ static ios_status initialize_modules_and_services(struct ios_kernel_runtime_stat
         state->generic_file_capability
     );
     if (IOS_FAILED(status)) return status;
+    status = ios_file_command_service_initialize(
+        &state->file_commands, &state->file_view, &state->path
+    );
+    if (IOS_FAILED(status)) return status;
     status = ios_extension_search_service_initialize(
         &state->extension_search, &state->mounts
     );
@@ -1533,7 +1560,8 @@ ios_status ios_kernel_runtime_initialize(const struct ios_boot_info *boot_info)
     };
     const struct ios_cui_file_operations file_operations = {
         runtime_file_create, runtime_file_write, runtime_file_append,
-        runtime_file_type, runtime_file_rename, runtime_file_remove
+        runtime_file_type, runtime_file_rename, runtime_file_remove,
+        runtime_file_cat
     };
     ios_status status;
     ios_status block_status;

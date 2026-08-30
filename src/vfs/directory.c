@@ -115,6 +115,40 @@ ios_status vfs_create_directory(
     return IOS_OK;
 }
 
+ios_status vfs_create_file(
+    const struct ios_vfs_path_context *context,
+    const char *path,
+    struct ios_vfs_object *object
+)
+{
+    struct path_leaf leaf;
+    struct ios_vfs_object parent;
+    ios_status status;
+    if (object == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    *object = (struct ios_vfs_object){ 0, IOS_VFS_OBJECT_REGULAR_FILE, 0 };
+    status = split_path(context, path, &leaf);
+    if (IOS_FAILED(status)) return status;
+    status = resolve_parent(context, &leaf, &parent);
+    if (IOS_FAILED(status)) return status;
+    if (context->mount->create_file == NULL) return IOS_ERROR(IOS_E_NOT_SUPPORTED);
+    status = vfs_mount_begin_operation(context->mount, true);
+    if (IOS_FAILED(status)) return status;
+    status = context->mount->create_file(
+        context->mount->driver_context, parent.identity,
+        leaf.component, leaf.component_length, object
+    );
+    status = finish_operation(context->mount, status);
+    if (IOS_FAILED(status)) {
+        *object = (struct ios_vfs_object){ 0, IOS_VFS_OBJECT_REGULAR_FILE, 0 };
+        return status;
+    }
+    if (object->identity == 0 || object->kind != IOS_VFS_OBJECT_REGULAR_FILE) {
+        *object = (struct ios_vfs_object){ 0, IOS_VFS_OBJECT_REGULAR_FILE, 0 };
+        return IOS_ERROR(IOS_E_PROTOCOL);
+    }
+    return IOS_OK;
+}
+
 ios_status vfs_remove_directory(
     const struct ios_vfs_path_context *context,
     const char *path

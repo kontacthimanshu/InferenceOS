@@ -15,9 +15,13 @@ struct sparse_disk {
 };
 struct fake_file_service {
     char path[64];
+    char last_operand[64];
     char content[256];
     ios_size length;
     bool exists;
+    ios_size create_calls;
+    ios_size write_calls;
+    ios_size forced_write_not_found;
 };
 struct fake_power_transition {
     ios_size calls;
@@ -145,10 +149,21 @@ static ios_status diagnostic_snapshot(
     return IOS_OK;
 }
 
-static ios_status resolve_diagnostic_path(void *opaque, const char *path, ios_u64 *identity)
+static ios_status resolve_diagnostic_path(
+    void *opaque,
+    enum ios_fs_diagnostic_query query,
+    const char *path,
+    ios_u64 *identity
+)
 {
     (void)opaque;
-    if (strcmp(path, "/REPORT.TXT") != 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    if ((query == IOS_FS_DIAGNOSTIC_QUERY_FILE && strcmp(path, "/REPORT") != 0)
+        || (query == IOS_FS_DIAGNOSTIC_QUERY_HASH
+            && strcmp(path, "/REPORT") != 0 && strcmp(path, "/REPORT.TXT") != 0)
+        || (query == IOS_FS_DIAGNOSTIC_QUERY_FAT
+            && strcmp(path, "/REPORT") != 0 && strcmp(path, "/REPORT.TXT") != 0)) {
+        return IOS_ERROR(IOS_E_NOT_FOUND);
+    }
     *identity = 77;
     return IOS_OK;
 }
@@ -156,6 +171,7 @@ static ios_status resolve_diagnostic_path(void *opaque, const char *path, ios_u6
 static ios_status fake_create(void *opaque, const char *path)
 {
     struct fake_file_service *service = opaque;
+    ++service->create_calls;
     if (service->exists) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
     strcpy(service->path, path);
     service->length = 0;
@@ -167,7 +183,13 @@ static ios_status fake_write(
     void *opaque, const char *path, const void *bytes, ios_size length)
 {
     struct fake_file_service *service = opaque;
-    if (!service->exists || strcmp(service->path, path) != 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    ++service->write_calls;
+    if (service->forced_write_not_found != 0) {
+        --service->forced_write_not_found;
+        return IOS_ERROR(IOS_E_NOT_FOUND);
+    }
+    if (!service->exists) return IOS_ERROR(IOS_E_NOT_FOUND);
+    strcpy(service->last_operand, path);
     if (length >= sizeof(service->content)) return IOS_ERROR(IOS_E_NO_SPACE);
     memcpy(service->content, bytes, length);
     service->content[length] = '\0';
@@ -178,7 +200,8 @@ static ios_status fake_append(
     void *opaque, const char *path, const void *bytes, ios_size length)
 {
     struct fake_file_service *service = opaque;
-    if (!service->exists || strcmp(service->path, path) != 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    if (!service->exists) return IOS_ERROR(IOS_E_NOT_FOUND);
+    strcpy(service->last_operand, path);
     if (length >= sizeof(service->content) - service->length) return IOS_ERROR(IOS_E_NO_SPACE);
     memcpy(service->content + service->length, bytes, length);
     service->length += length;
@@ -193,10 +216,20 @@ static ios_status fake_type(
     output(service->content, output_context);
     return IOS_OK;
 }
+static ios_status fake_cat(
+    void *opaque, const char *path, ios_cui_write output, void *output_context)
+{
+    struct fake_file_service *service = opaque;
+    if (!service->exists) return IOS_ERROR(IOS_E_NOT_FOUND);
+    strcpy(service->last_operand, path);
+    output(service->content, output_context);
+    return IOS_OK;
+}
 static ios_status fake_rename(void *opaque, const char *source, const char *destination)
 {
     struct fake_file_service *service = opaque;
-    if (!service->exists || strcmp(service->path, source) != 0) return IOS_ERROR(IOS_E_NOT_FOUND);
+    if (!service->exists) return IOS_ERROR(IOS_E_NOT_FOUND);
+    strcpy(service->last_operand, source);
     strcpy(service->path, destination);
     return IOS_OK;
 }
@@ -242,6 +275,8 @@ static ios_status fake_directory_enumerate(
     ios_size capacity, ios_size *entry_count
 )
 {
+    ios_size ranks[3];
+    ios_status status;
     (void)opaque;
     if (strcmp(path, ".") != 0 && strcmp(path, "/") != 0) {
         return IOS_ERROR(IOS_E_NOT_FOUND);
@@ -256,7 +291,8 @@ static ios_status fake_directory_enumerate(
     IOS_TEST_ASSERT_STATUS(
         make_safe_entry(&entries[2], "DOCS", 11, 0, 0, IOS_DISPLAY_SAFE_DIRECTORY), IOS_OK);
     *entry_count = 3;
-    return IOS_OK;
+    status = ios_display_safe_entries_disambiguate(entries, *entry_count, ranks, 3);
+    return status;
 }
 
 static ios_status malformed_directory_enumerate(
@@ -443,7 +479,8 @@ static void test_mount_commands_report_diagnostic_and_rejected_states(void)
 static void test_file_commands_share_provider_and_preserve_quoted_content(void)
 {
     static const struct ios_cui_file_operations operations = {
-        fake_create, fake_write, fake_append, fake_type, fake_rename, fake_remove
+        fake_create, fake_write, fake_append, fake_type, fake_rename, fake_remove,
+        fake_cat
     };
     struct ios_vfs_mount_registry mounts;
     struct ios_fs_mount filesystem;
@@ -460,16 +497,86 @@ static void test_file_commands_share_provider_and_preserve_quoted_content(void)
     ios_cui_command_registry_initialize(&commands);
     IOS_TEST_ASSERT_STATUS(ios_cui_register_fs_commands(&commands), IOS_OK);
     IOS_TEST_ASSERT_STATUS(dispatch("create /REPORT.TXT", &commands, &io), IOS_OK);
-    IOS_TEST_ASSERT_STATUS(dispatch("write /REPORT.TXT \"persistent data\"", &commands, &io), IOS_OK);
-    IOS_TEST_ASSERT_STATUS(dispatch("append /REPORT.TXT \"!\"", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(dispatch("write /REPORT \"persistent data\"", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "/REPORT") == 0);
+    IOS_TEST_ASSERT_STATUS(dispatch("append /REPORT \"!\"", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "/REPORT") == 0);
     IOS_TEST_ASSERT_STATUS(dispatch("type /REPORT.TXT", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strcmp(output.bytes, "persistent data!") == 0);
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(dispatch("cat /REPORT", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "/REPORT") == 0);
+    IOS_TEST_ASSERT(strcmp(output.bytes, "persistent data!") == 0);
     IOS_TEST_ASSERT_STATUS(
-        dispatch("rename /REPORT.TXT /SUMMARY.LOG", &commands, &io), IOS_OK
+        dispatch("write \"/REPORT (2)\" \"collision data\"", &commands, &io), IOS_OK
     );
-    IOS_TEST_ASSERT_STATUS(dispatch("type /REPORT.TXT", &commands, &io), IOS_ERROR(IOS_E_NOT_FOUND));
-    IOS_TEST_ASSERT_STATUS(dispatch("delete /SUMMARY.LOG", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "/REPORT (2)") == 0);
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("rename /REPORT /SUMMARY", &commands, &io), IOS_OK
+    );
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "/REPORT") == 0);
+    IOS_TEST_ASSERT_STATUS(dispatch("delete /SUMMARY", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(!service.exists);
+}
+
+static void test_write_creates_a_missing_extensionless_text_file(void)
+{
+    static const struct ios_cui_file_operations operations = {
+        fake_create, fake_write, fake_append, fake_type, fake_rename, fake_remove,
+        fake_cat
+    };
+    struct ios_vfs_mount_registry mounts;
+    struct ios_fs_mount filesystem;
+    struct ios_cui_fs_context context;
+    struct ios_cui_command_registry commands;
+    struct fake_file_service service = { 0 };
+    struct output_buffer output = { 0 };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
+    vfs_mount_registry_initialize(&mounts);
+    IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_fs_set_file_operations(&context, &service, &operations), IOS_OK
+    );
+    ios_cui_command_registry_initialize(&commands);
+    IOS_TEST_ASSERT_STATUS(ios_cui_register_fs_commands(&commands), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("write FILE1 \"Hello World\"", &commands, &io), IOS_OK
+    );
+    IOS_TEST_ASSERT(service.exists);
+    IOS_TEST_ASSERT(strcmp(service.path, "FILE1") == 0);
+    IOS_TEST_ASSERT(strcmp(service.last_operand, "FILE1") == 0);
+    IOS_TEST_ASSERT(strcmp(service.content, "Hello World") == 0);
+}
+
+static void test_write_retries_resolution_when_create_reports_existing_base(void)
+{
+    static const struct ios_cui_file_operations operations = {
+        fake_create, fake_write, fake_append, fake_type, fake_rename, fake_remove,
+        fake_cat
+    };
+    struct ios_vfs_mount_registry mounts;
+    struct ios_fs_mount filesystem;
+    struct ios_cui_fs_context context;
+    struct ios_cui_command_registry commands;
+    struct fake_file_service service = {
+        .exists = true,
+        .forced_write_not_found = 1
+    };
+    struct output_buffer output = { 0 };
+    struct ios_cui_io io = { capture, &output, &context, NULL, NULL };
+    strcpy(service.path, "FILE1.TXT");
+    vfs_mount_registry_initialize(&mounts);
+    IOS_TEST_ASSERT_STATUS(ios_cui_fs_context_initialize(&context, &mounts, &filesystem), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        ios_cui_fs_set_file_operations(&context, &service, &operations), IOS_OK
+    );
+    ios_cui_command_registry_initialize(&commands);
+    IOS_TEST_ASSERT_STATUS(ios_cui_register_fs_commands(&commands), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("write FILE1 \"Hello World\"", &commands, &io), IOS_OK
+    );
+    IOS_TEST_ASSERT(service.create_calls == 1 && service.write_calls == 2);
+    IOS_TEST_ASSERT(strcmp(service.content, "Hello World") == 0);
 }
 
 static void test_file_commands_validate_arity_and_provider_errors(void)
@@ -487,6 +594,10 @@ static void test_file_commands_validate_arity_and_provider_errors(void)
     IOS_TEST_ASSERT_STATUS(dispatch("create", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT));
     IOS_TEST_ASSERT_STATUS(
         dispatch("write /REPORT.TXT", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
+    );
+    IOS_TEST_ASSERT_STATUS(dispatch("cat", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT));
+    IOS_TEST_ASSERT_STATUS(
+        dispatch("cat /REPORT extra", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
     );
     IOS_TEST_ASSERT_STATUS(
         dispatch("delete /REPORT.TXT extra", &commands, &io), IOS_ERROR(IOS_E_INVALID_ARGUMENT)
@@ -722,12 +833,20 @@ static void test_privileged_diagnostic_commands_render_authoritative_dtos(void)
     IOS_TEST_ASSERT(strstr(output.bytes, "filesystem=INFOSFS1 format_version=1") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "free_state=known free_bytes=12288") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "registry=disabled registry_active_types=0") != NULL);
-    IOS_TEST_ASSERT_STATUS(dispatch("fileinfo /REPORT.TXT", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT_STATUS(dispatch("fileinfo /REPORT", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strstr(output.bytes, "canonical_name=REPORT  TXT object_type=regular_file") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "primary_record_location=4096 companion_record_location=4064") != NULL);
-    IOS_TEST_ASSERT_STATUS(dispatch("hashinfo /REPORT.TXT", &commands, &io), IOS_OK);
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(dispatch("hashinfo /REPORT", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strstr(output.bytes, "extension=TXT canonical_extension_bytes=TXT extension_length=3") != NULL);
     IOS_TEST_ASSERT(strstr(output.bytes, "committed=yes association_checksum_valid=yes crc_valid=yes") != NULL);
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(dispatch("hashinfo /REPORT.TXT", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strstr(output.bytes, "validation=valid") != NULL);
+    memset(&output, 0, sizeof(output));
+    IOS_TEST_ASSERT_STATUS(dispatch("fatinfo /REPORT", &commands, &io), IOS_OK);
+    IOS_TEST_ASSERT(strstr(output.bytes, "cluster_count=1 chain=2 end_of_chain=yes") != NULL);
+    memset(&output, 0, sizeof(output));
     IOS_TEST_ASSERT_STATUS(dispatch("fatinfo /REPORT.TXT", &commands, &io), IOS_OK);
     IOS_TEST_ASSERT(strstr(output.bytes, "cluster_count=1 chain=2 end_of_chain=yes") != NULL);
 }
@@ -835,6 +954,8 @@ const struct ios_test_case ios_test_cases[] = {
     IOS_TEST_CASE(test_commands_reject_bad_devices_paths_and_unsafe_state),
     IOS_TEST_CASE(test_mount_commands_report_diagnostic_and_rejected_states),
     IOS_TEST_CASE(test_file_commands_share_provider_and_preserve_quoted_content),
+    IOS_TEST_CASE(test_write_creates_a_missing_extensionless_text_file),
+    IOS_TEST_CASE(test_write_retries_resolution_when_create_reports_existing_base),
     IOS_TEST_CASE(test_file_commands_validate_arity_and_provider_errors),
     IOS_TEST_CASE(test_sync_command_propagates_durable_provider_result),
     IOS_TEST_CASE(test_power_commands_refuse_failed_sync_before_transition),

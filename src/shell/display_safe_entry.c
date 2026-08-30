@@ -146,3 +146,25 @@ ios_status ios_display_safe_entries_disambiguate(
     }
     return IOS_OK;
 }
+
+ios_status ios_display_safe_entries_validate_final(
+    const struct ios_display_safe_entry *entries, ios_size count
+)
+{
+    if (entries == NULL && count != 0) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    for (ios_size index = 0; index < count; ++index) {
+        ios_status status = validate_entry(&entries[index]);
+        if (IOS_FAILED(status)) return status;
+        for (ios_size other = 0; other < index; ++other) {
+            if (entries[other].object_handle == entries[index].object_handle
+                || (entries[other].display_name_length == entries[index].display_name_length
+                    && memcmp(
+                        entries[other].display_name, entries[index].display_name,
+                        entries[index].display_name_length
+                    ) == 0)) {
+                return IOS_ERROR(IOS_E_CORRUPT);
+            }
+        }
+    }
+    return IOS_OK;
+}

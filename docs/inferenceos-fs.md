@@ -227,6 +227,30 @@ updates the checksum and companion CRC. An extension-changing rename recomputes 
 checksum, and CRC. Hash-based lookup is only a prefilter: exact authoritative extension bytes and
 length must match before a type match is returned, so collisions do not affect identity or routing.
 
+### Display-safe CUI file operations
+
+The trusted file-view service takes one complete, bounded directory snapshot, converts raw entries
+to extension-hidden entries, and assigns collision labels such as `REPORT`, `REPORT (2)`, and
+`REPORT (3)` by object-identity rank. The same finalized labels are rendered by `dir` and resolved
+for `write`, `append`, `rename`, `delete`, and `fileinfo`. Incomplete snapshots and duplicate or
+malformed identities fail closed instead of selecting a guessed extension.
+
+Creation and rename enforce uniqueness of the first eight canonical name bytes across regular files
+and directories in the destination directory. For example, after `FILE1.TXT` exists, creating
+`FILE1.LOG`, creating extensionless `FILE1`, or renaming another entry to the displayed base
+`FILE1` returns `already_exists`. Collision labels remain available only so pre-existing or
+externally produced collision-bearing media can be repaired without selecting the wrong object.
+
+Mutating commands pass the resolved object identity through VFS mutation wrappers. InferenceOS-FS
+revalidates that identity against the current directory record before starting its existing
+companion/primary/FAT transaction. A base-only rename copies the source extension bytes into the
+destination record, so `rename REPORT SUMMARY` changes `REPORT.TXT` to `SUMMARY.TXT` without
+exposing or changing the authoritative type. Character writes do not consult that type identity:
+`write` initializes an existing empty file or creates a missing extensionless file, while `append`
+reads and validates all existing content through the resolved VFS object identity. Printable ASCII
+plus tab, carriage return, and line feed is accepted;
+other bytes produce `unexpected_format` before mutation.
+
 ### Extension search
 
 The shell-facing `search <extension>` service accepts one to three supported extension characters,

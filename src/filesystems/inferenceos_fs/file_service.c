@@ -382,6 +382,107 @@ static ios_status find_in_directory(
     return IOS_ERROR(IOS_E_NOT_FOUND);
 }
 
+static ios_status find_display_base_in_directory(
+    struct ios_fs_file_service *service,
+    ios_u32 directory_cluster,
+    const ios_u8 name[IOS_FS_NAME_SIZE],
+    const struct located_entry *ignored
+)
+{
+    ios_size chain_count;
+    ios_status status = directory_chain(service, directory_cluster, &chain_count);
+    if (IOS_FAILED(status)) return status;
+    for (ios_size chain_index = 0; chain_index < chain_count; ++chain_index) {
+        ios_size entry_count;
+        status = read_cluster(service, service->chain[chain_index], service->directory);
+        if (IOS_FAILED(status)) return status;
+        status = scan_loaded_directory(service, &entry_count);
+        if (IOS_FAILED(status)) return status;
+        for (ios_size index = 0; index < entry_count; ++index) {
+            const struct ios_fs_directory_entry *entry =
+                &service->directory_entries[index];
+            if (entry->kind == IOS_FS_DIRECTORY_ENTRY_INTERNAL
+                || memcmp(
+                    entry->primary.name, name,
+                    IOS_FS_NAME_SIZE - IOS_FS_EXTENSION_SIZE
+                ) != 0) continue;
+            if (ignored != NULL
+                && ignored->directory_cluster == service->chain[chain_index]
+                && ignored->primary_slot == entry->primary_slot) continue;
+            return IOS_OK;
+        }
+    }
+    return IOS_ERROR(IOS_E_NOT_FOUND);
+}
+
+static ios_status locate_file_object(
+    struct ios_fs_file_service *service,
+    ios_u64 object_identity,
+    struct located_entry *located
+)
+{
+    const ios_u64 location = object_identity & ~IOS_FS_FILE_OBJECT_BIT;
+    const ios_u64 sector = location / IOS_FS_SECTOR_SIZE;
+    const ios_size byte_offset = (ios_size)(location % IOS_FS_SECTOR_SIZE);
+    ios_u64 relative_sector;
+    ios_u64 cluster_value;
+    ios_size primary_slot;
+    ios_size entry_count;
+    ios_status status;
+    if (service == NULL || located == NULL
+        || (object_identity & IOS_FS_FILE_OBJECT_BIT) == 0
+        || byte_offset % IOS_FS_PRIMARY_RECORD_SIZE != 0
+        || service->mount == NULL
+        || sector < service->mount->geometry.data_start_sector
+        || sector >= service->mount->geometry.total_sectors) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    relative_sector = sector - service->mount->geometry.data_start_sector;
+    cluster_value = UINT64_C(2) + relative_sector / IOS_FS_SECTORS_PER_CLUSTER;
+    if (cluster_value > UINT32_MAX
+        || !valid_directory_cluster(service, cluster_value)) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    primary_slot = (ios_size)(relative_sector % IOS_FS_SECTORS_PER_CLUSTER)
+        * DIRECTORY_SLOTS_PER_SECTOR + byte_offset / IOS_FS_PRIMARY_RECORD_SIZE;
+    if (primary_slot >= IOS_FS_FILE_SERVICE_DIRECTORY_SLOTS) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = read_cluster(service, (ios_u32)cluster_value, service->directory);
+    if (IOS_FAILED(status)) return status;
+    status = scan_loaded_directory(service, &entry_count);
+    if (IOS_FAILED(status)) return status;
+    for (ios_size index = 0; index < entry_count; ++index) {
+        const struct ios_fs_directory_entry *entry = &service->directory_entries[index];
+        if (entry->kind != IOS_FS_DIRECTORY_ENTRY_REGULAR
+            || entry->primary_slot != primary_slot) continue;
+        if (entry->companion_slot == SIZE_MAX
+            || entry->primary_slot > UINT16_MAX
+            || entry->companion_slot > UINT16_MAX) {
+            return IOS_ERROR(IOS_E_CORRUPT);
+        }
+        memset(located, 0, sizeof(*located));
+        located->primary = entry->primary;
+        located->directory_cluster = (ios_u32)cluster_value;
+        located->primary_slot = (ios_u16)entry->primary_slot;
+        located->companion_slot = (ios_u16)entry->companion_slot;
+        located->has_companion = true;
+        memcpy(
+            &located->primary_disk,
+            service->directory + entry->primary_slot * IOS_FS_PRIMARY_RECORD_SIZE,
+            sizeof(located->primary_disk)
+        );
+        memcpy(
+            &located->companion_disk,
+            service->directory + entry->companion_slot * IOS_FS_PRIMARY_RECORD_SIZE,
+            sizeof(located->companion_disk)
+        );
+        return file_identity(service, located) == object_identity
+            ? IOS_OK : IOS_ERROR(IOS_E_CORRUPT);
+    }
+    return IOS_ERROR(IOS_E_NOT_FOUND);
+}
+
 static ios_status resolve_directory(
     struct ios_fs_file_service *service,
     const char *path,
@@ -704,9 +805,15 @@ ios_status ios_fs_file_service_initialize(
     mount->vfs.enumerate = ios_fs_file_service_enumerate;
     mount->vfs.lookup = ios_fs_file_service_lookup;
     mount->vfs.create_directory = ios_fs_file_service_create_directory;
+    mount->vfs.create_file = ios_fs_file_service_create_file;
     mount->vfs.remove_directory = ios_fs_file_service_remove_directory;
     mount->vfs.rename = ios_fs_file_service_vfs_rename;
     mount->vfs.search_extension = ios_fs_file_service_search_extension;
+    mount->vfs.read_object = ios_fs_file_service_read_object;
+    mount->vfs.replace_object = ios_fs_file_service_replace_object;
+    mount->vfs.append_object = ios_fs_file_service_append_object;
+    mount->vfs.remove_object = ios_fs_file_service_remove_object;
+    mount->vfs.rename_object = ios_fs_file_service_rename_object;
     service->initialized = true;
     return IOS_OK;
 }
@@ -757,31 +864,74 @@ ios_status ios_fs_file_service_search_extension(
     return IOS_OK;
 }
 
-ios_status ios_fs_file_service_create(
-    struct ios_fs_file_service *service, const char *path
+static ios_status create_file_in_directory(
+    struct ios_fs_file_service *service,
+    ios_u32 parent,
+    const ios_u8 name[IOS_FS_NAME_SIZE],
+    struct ios_vfs_object *object
 )
 {
     struct ios_fs_primary primary = { .attributes = IOS_FS_ATTRIBUTE_REGULAR };
     struct located_entry located;
-    ios_u32 parent;
-    ios_u8 name[IOS_FS_NAME_SIZE];
-    ios_status status = validate_service(service, true);
-    if (IOS_FAILED(status)) return status;
-    status = resolve_parent(service, path, &parent, name);
-    if (IOS_FAILED(status)) return status;
-    status = find_in_directory(service, parent, name, NULL);
+    ios_status status = find_display_base_in_directory(service, parent, name, NULL);
     if (IOS_SUCCEEDED(status)) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
     if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
     memset(&located, 0, sizeof(located));
     status = find_file_slots(service, parent, &located);
     if (IOS_FAILED(status)) return status;
     memcpy(primary.name, name, sizeof(primary.name));
-    return commit_primary(service, &located, &primary);
+    status = commit_primary(service, &located, &primary);
+    if (IOS_FAILED(status)) return status;
+    if (object != NULL) {
+        *object = (struct ios_vfs_object){
+            file_identity(service, &located), IOS_VFS_OBJECT_REGULAR_FILE, 0
+        };
+    }
+    return IOS_OK;
+}
+
+ios_status ios_fs_file_service_create(
+    struct ios_fs_file_service *service, const char *path
+)
+{
+    ios_u32 parent;
+    ios_u8 name[IOS_FS_NAME_SIZE];
+    ios_status status = validate_service(service, true);
+    if (IOS_FAILED(status)) return status;
+    status = resolve_parent(service, path, &parent, name);
+    return IOS_FAILED(status) ? status
+        : create_file_in_directory(service, parent, name, NULL);
+}
+
+ios_status ios_fs_file_service_create_file(
+    void *context,
+    ios_u64 parent_identity,
+    const char *component,
+    ios_size component_length,
+    struct ios_vfs_object *object
+)
+{
+    struct ios_fs_file_service *service = context;
+    ios_u8 name[IOS_FS_NAME_SIZE];
+    ios_status status;
+    if (object == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    *object = (struct ios_vfs_object){ 0, IOS_VFS_OBJECT_REGULAR_FILE, 0 };
+    status = validate_service(service, true);
+    if (IOS_FAILED(status)) return status;
+    if (!valid_directory_cluster(service, parent_identity)) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = canonical_component(component, component_length, name);
+    return IOS_FAILED(status) ? status
+        : create_file_in_directory(
+            service, (ios_u32)parent_identity, name, object
+        );
 }
 
 static ios_status save_content(
     struct ios_fs_file_service *service,
     const char *path,
+    ios_u64 object_identity,
     const void *bytes,
     ios_size length,
     bool append
@@ -794,7 +944,9 @@ static ios_status save_content(
     ios_status status = validate_service(service, true);
     if (IOS_FAILED(status)) return status;
     if (bytes == NULL && length != 0) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    status = resolve_path(service, path, &located);
+    status = path != NULL
+        ? resolve_path(service, path, &located)
+        : locate_file_object(service, object_identity, &located);
     if (IOS_FAILED(status)) return status;
     if (!located.has_companion
         || located.primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
@@ -843,11 +995,11 @@ static ios_status save_content(
         status = barrier(service);
         if (IOS_FAILED(status)) return status;
     }
-    located.primary.first_cluster = new_count == 0 ? 0 : service->chain[0];
+    located.primary.first_cluster = new_count == 0 ? 0 : *service->chain;
     located.primary.file_size = (ios_u32)new_size;
     status = commit_primary(service, &located, &located.primary);
     if (IOS_FAILED(status)) return status;
-    return release_chain(service, old_count == 0 ? 0 : service->old_chain[0]);
+    return release_chain(service, old_count == 0 ? 0 : *service->old_chain);
 
 rollback:
     (void)load_fat(service);
@@ -861,7 +1013,7 @@ ios_status ios_fs_file_service_replace(
     ios_size length
 )
 {
-    return save_content(service, name, bytes, length, false);
+    return save_content(service, name, 0, bytes, length, false);
 }
 
 ios_status ios_fs_file_service_append(
@@ -871,13 +1023,34 @@ ios_status ios_fs_file_service_append(
     ios_size length
 )
 {
-    return save_content(service, name, bytes, length, true);
+    return save_content(service, name, 0, bytes, length, true);
 }
 
-ios_status ios_fs_file_service_read(
+ios_status ios_fs_file_service_replace_object(
+    void *context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+)
+{
+    return save_content(context, NULL, object_identity, bytes, length, false);
+}
+
+ios_status ios_fs_file_service_append_object(
+    void *context,
+    ios_u64 object_identity,
+    const void *bytes,
+    ios_size length
+)
+{
+    return save_content(context, NULL, object_identity, bytes, length, true);
+}
+
+static ios_status read_content(
     struct ios_fs_file_service *service,
     const char *path,
-    ios_u32 offset,
+    ios_u64 object_identity,
+    ios_u64 offset,
     void *buffer,
     ios_size capacity,
     ios_size *transferred,
@@ -894,7 +1067,9 @@ ios_status ios_fs_file_service_read(
     *transferred = 0;
     *complete = false;
     if (IOS_FAILED(status)) return status;
-    status = resolve_path(service, path, &located);
+    status = path != NULL
+        ? resolve_path(service, path, &located)
+        : locate_file_object(service, object_identity, &located);
     if (IOS_FAILED(status)) return status;
     if (!located.has_companion
         || located.primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
@@ -910,7 +1085,7 @@ ios_status ios_fs_file_service_read(
     remaining = located.primary.file_size - offset;
     if (remaining > capacity) remaining = capacity;
     while (*transferred < remaining) {
-        const ios_u32 position = offset + (ios_u32)*transferred;
+        const ios_u64 position = offset + *transferred;
         const ios_size chain_index = position / IOS_FS_FILE_SERVICE_CLUSTER_BYTES;
         const ios_size cluster_offset = position % IOS_FS_FILE_SERVICE_CLUSTER_BYTES;
         ios_size chunk = IOS_FS_FILE_SERVICE_CLUSTER_BYTES - cluster_offset;
@@ -923,6 +1098,38 @@ ios_status ios_fs_file_service_read(
     }
     *complete = offset + *transferred == located.primary.file_size;
     return IOS_OK;
+}
+
+ios_status ios_fs_file_service_read(
+    struct ios_fs_file_service *service,
+    const char *path,
+    ios_u32 offset,
+    void *buffer,
+    ios_size capacity,
+    ios_size *transferred,
+    bool *complete
+)
+{
+    if (path == NULL) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    return read_content(
+        service, path, 0, offset, buffer, capacity, transferred, complete
+    );
+}
+
+ios_status ios_fs_file_service_read_object(
+    void *context,
+    ios_u64 object_identity,
+    ios_u64 offset,
+    void *buffer,
+    ios_size capacity,
+    ios_size *transferred,
+    bool *complete
+)
+{
+    if (object_identity == 0) return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    return read_content(
+        context, NULL, object_identity, offset, buffer, capacity, transferred, complete
+    );
 }
 
 static ios_status delete_located(
@@ -950,6 +1157,55 @@ static ios_status delete_located(
     return IOS_FAILED(status) ? status : barrier(service);
 }
 
+static ios_status rename_located(
+    struct ios_fs_file_service *service,
+    struct located_entry *source_entry,
+    ios_u32 destination_parent,
+    const ios_u8 destination_name[IOS_FS_NAME_SIZE]
+)
+{
+    struct located_entry destination_entry;
+    ios_status status;
+    if (!source_entry->has_companion
+        || source_entry->primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = ios_fs_record_pair_validate(
+        &source_entry->companion_disk, &source_entry->primary_disk
+    );
+    if (IOS_FAILED(status)) return status;
+    status = find_in_directory(service, destination_parent, destination_name, NULL);
+    if (IOS_SUCCEEDED(status)) {
+        return source_entry->directory_cluster == destination_parent
+            && memcmp(source_entry->primary.name, destination_name, IOS_FS_NAME_SIZE) == 0
+            ? IOS_OK : IOS_ERROR(IOS_E_ALREADY_EXISTS);
+    }
+    if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = find_display_base_in_directory(
+        service, destination_parent, destination_name,
+        source_entry->directory_cluster == destination_parent ? source_entry : NULL
+    );
+    if (IOS_SUCCEEDED(status)) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
+    if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    if (source_entry->directory_cluster == destination_parent) {
+        status = persist_companion(
+            service, source_entry, source_entry->primary.name, false
+        );
+        if (IOS_FAILED(status)) return status;
+        status = barrier(service);
+        if (IOS_FAILED(status)) return status;
+        memcpy(source_entry->primary.name, destination_name, IOS_FS_NAME_SIZE);
+        return commit_primary(service, source_entry, &source_entry->primary);
+    }
+    memset(&destination_entry, 0, sizeof(destination_entry));
+    status = find_file_slots(service, destination_parent, &destination_entry);
+    if (IOS_FAILED(status)) return status;
+    memcpy(source_entry->primary.name, destination_name, IOS_FS_NAME_SIZE);
+    status = commit_primary(service, &destination_entry, &source_entry->primary);
+    if (IOS_FAILED(status)) return status;
+    return delete_located(service, source_entry);
+}
+
 ios_status ios_fs_file_service_rename(
     struct ios_fs_file_service *service,
     const char *source,
@@ -957,43 +1213,76 @@ ios_status ios_fs_file_service_rename(
 )
 {
     struct located_entry source_entry;
-    struct located_entry destination_entry;
     ios_u32 destination_parent;
     ios_u8 destination_name[IOS_FS_NAME_SIZE];
     ios_status status = validate_service(service, true);
     if (IOS_FAILED(status)) return status;
     status = resolve_path(service, source, &source_entry);
     if (IOS_FAILED(status)) return status;
-    if (!source_entry.has_companion
-        || source_entry.primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
     status = resolve_parent(service, destination, &destination_parent, destination_name);
     if (IOS_FAILED(status)) return status;
-    status = find_in_directory(service, destination_parent, destination_name, NULL);
-    if (IOS_SUCCEEDED(status)) {
-        return source_entry.directory_cluster == destination_parent
-            && memcmp(source_entry.primary.name, destination_name, IOS_FS_NAME_SIZE) == 0
-            ? IOS_OK : IOS_ERROR(IOS_E_ALREADY_EXISTS);
-    }
-    if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
-    if (source_entry.directory_cluster == destination_parent) {
-        status = persist_companion(
-            service, &source_entry, source_entry.primary.name, false
-        );
-        if (IOS_FAILED(status)) return status;
-        status = barrier(service);
-        if (IOS_FAILED(status)) return status;
-        memcpy(source_entry.primary.name, destination_name, IOS_FS_NAME_SIZE);
-        return commit_primary(service, &source_entry, &source_entry.primary);
-    }
-    memset(&destination_entry, 0, sizeof(destination_entry));
-    status = find_file_slots(service, destination_parent, &destination_entry);
+    return rename_located(
+        service, &source_entry, destination_parent, destination_name
+    );
+}
+
+ios_status ios_fs_file_service_rename_object(
+    void *context,
+    ios_u64 object_identity,
+    ios_u64 destination_parent_identity,
+    const char *destination_base,
+    ios_size destination_base_length
+)
+{
+    struct ios_fs_file_service *service = context;
+    struct located_entry source_entry;
+    ios_u8 destination_name[IOS_FS_NAME_SIZE];
+    ios_status status = validate_service(service, true);
     if (IOS_FAILED(status)) return status;
-    memcpy(source_entry.primary.name, destination_name, IOS_FS_NAME_SIZE);
-    status = commit_primary(service, &destination_entry, &source_entry.primary);
+    if (!valid_directory_cluster(service, destination_parent_identity)
+        || destination_base == NULL || destination_base_length == 0
+        || destination_base_length > 8) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    for (ios_size index = 0; index < destination_base_length; ++index) {
+        if (destination_base[index] == '.' || destination_base[index] == '/'
+            || destination_base[index] == '\\') {
+            return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+        }
+    }
+    status = locate_file_object(service, object_identity, &source_entry);
     if (IOS_FAILED(status)) return status;
-    return delete_located(service, &source_entry);
+    status = canonical_component(
+        destination_base, destination_base_length, destination_name
+    );
+    if (IOS_FAILED(status)) return status;
+    for (ios_size index = 8; index < IOS_FS_NAME_SIZE; ++index) {
+        if (destination_name[index] != ' ') return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+        destination_name[index] = source_entry.primary.name[index];
+    }
+    return rename_located(
+        service, &source_entry, (ios_u32)destination_parent_identity,
+        destination_name
+    );
+}
+
+static ios_status remove_located_file(
+    struct ios_fs_file_service *service,
+    struct located_entry *located
+)
+{
+    ios_status status;
+    if (!located->has_companion
+        || located->primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
+        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
+    }
+    status = ios_fs_record_pair_validate(
+        &located->companion_disk, &located->primary_disk
+    );
+    if (IOS_FAILED(status)) return status;
+    status = delete_located(service, located);
+    return IOS_FAILED(status) ? status
+        : release_chain(service, located->primary.first_cluster);
 }
 
 ios_status ios_fs_file_service_remove(
@@ -1005,14 +1294,20 @@ ios_status ios_fs_file_service_remove(
     if (IOS_FAILED(status)) return status;
     status = resolve_path(service, path, &located);
     if (IOS_FAILED(status)) return status;
-    if (!located.has_companion
-        || located.primary.attributes != IOS_FS_ATTRIBUTE_REGULAR) {
-        return IOS_ERROR(IOS_E_INVALID_ARGUMENT);
-    }
-    status = ios_fs_record_pair_validate(&located.companion_disk, &located.primary_disk);
+    return remove_located_file(service, &located);
+}
+
+ios_status ios_fs_file_service_remove_object(
+    void *context,
+    ios_u64 object_identity
+)
+{
+    struct ios_fs_file_service *service = context;
+    struct located_entry located;
+    ios_status status = validate_service(service, true);
     if (IOS_FAILED(status)) return status;
-    status = delete_located(service, &located);
-    return IOS_FAILED(status) ? status : release_chain(service, located.primary.first_cluster);
+    status = locate_file_object(service, object_identity, &located);
+    return IOS_FAILED(status) ? status : remove_located_file(service, &located);
 }
 
 static void display_base_name(
@@ -1201,7 +1496,9 @@ ios_status ios_fs_file_service_create_directory(
     if (IOS_FAILED(status)) return status;
     status = canonical_component(component, component_length, name);
     if (IOS_FAILED(status)) return status;
-    status = find_in_directory(service, (ios_u32)parent_identity, name, NULL);
+    status = find_display_base_in_directory(
+        service, (ios_u32)parent_identity, name, NULL
+    );
     if (IOS_SUCCEEDED(status)) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
     if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
     memset(&located, 0, sizeof(located));
@@ -1226,7 +1523,7 @@ ios_status ios_fs_file_service_create_directory(
     status = barrier(service);
     if (IOS_FAILED(status)) return status;
     memcpy(primary.name, name, sizeof(primary.name));
-    primary.first_cluster = service->chain[0];
+    primary.first_cluster = *service->chain;
     status = ios_fs_primary_encode(&primary, &primary_disk);
     if (IOS_FAILED(status)) return status;
     status = persist_directory_slot(
@@ -1335,6 +1632,12 @@ ios_status ios_fs_file_service_vfs_rename(
     if (IOS_FAILED(status)) return status;
     status = find_in_directory(
         service, (ios_u32)destination_parent_identity, destination_name, NULL
+    );
+    if (IOS_SUCCEEDED(status)) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
+    if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;
+    status = find_display_base_in_directory(
+        service, (ios_u32)destination_parent_identity, destination_name,
+        source_parent_identity == destination_parent_identity ? &source : NULL
     );
     if (IOS_SUCCEEDED(status)) return IOS_ERROR(IOS_E_ALREADY_EXISTS);
     if (status != IOS_ERROR(IOS_E_NOT_FOUND)) return status;

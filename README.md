@@ -235,3 +235,49 @@ Run from elevated PowerShell:
       -Force `
       -Confirm:$false `
       -Start
+
+## Mandatory File System Mounting
+
+- After the InferenceOS has booted up and command prompt is visible. Run following commands to mount the InferenceOS-FS FAT disk.
+
+#### format disk0
+#### mount disk0 /
+
+## Command and Feature Illustration Commands
+
+The following commands are available at the `InferenceOS>` prompt. Arguments in angle brackets are
+required, while arguments in square brackets are optional. Commands that use a displayed path expect
+the extension-hidden name shown by `dir`. Diagnostic commands require the kernel-provided diagnostic
+capability described in [the CUI documentation](docs/cui.md#privileged-diagnostic-commands).
+
+| Command | Brief Description | Few Examples |
+|---|---|---|
+| `help [command]` | Lists every registered command, or shows the exact syntax and summary for one command. | `help`<br>`help write`<br>`help diskinfo` |
+| `version` | Displays the current InferenceOS version. | `version` |
+| `clear` | Clears the active text console. | `clear` |
+| `gui` | Starts the graphical desktop; a startup failure leaves the CUI available. | `gui` |
+| `devices` | Lists registered block devices and their status, sector geometry, and capacity. | `devices` |
+| `diskinfo <diskN>` | Shows a block device's geometry, detected filesystem, classification, and mount state. | `diskinfo disk0`<br>`diskinfo disk1` |
+| `format <diskN>` | Creates an InferenceOS-FS filesystem on an eligible unmounted device. This erases that device's existing filesystem data. | `format disk0`<br>`format disk1` |
+| `mount <diskN> /` | Probes and mounts an InferenceOS-FS device as the VFS root. | `mount disk0 /`<br>`mount disk1 /` |
+| `unmount /` | Flushes storage and unmounts the VFS root when no operation is active. | `unmount /` |
+| `fsinfo` | Displays mounted-filesystem identity, capacity, geometry, free-space, hash, and registry information. | `fsinfo` |
+| `sync` | Persists filesystem and cache state, then flushes the device. | `sync` |
+| `reboot` | Synchronizes required storage state and requests a restart. | `reboot` |
+| `shutdown` | Synchronizes required storage state and requests a halt or power-off. | `shutdown` |
+| `create <path>` | Creates an empty regular file at a canonical typed path. | `create /DOCS/REPORT.TXT`<br>`create NOTES.TXT`<br>`create /IMAGES/LOGO.BMP` |
+| `write <display-path> "<text>"` | Creates an extensionless text file, or initializes an existing empty file, using its displayed path. | `write NOTE "Hello"`<br>`write /DOCS/REPORT "persistent data"`<br>`write "/DOCS/REPORT (2)" "second copy"` |
+| `append <display-path> "<text>"` | Appends supported text to an empty or content-validated text file. | `append NOTE " world"`<br>`append /DOCS/REPORT " and more"` |
+| `type <path>` | Displays file content addressed by its canonical typed path. | `type /DOCS/REPORT.TXT`<br>`type NOTES.TXT` |
+| `cat <display-path>` | Validates a complete file as supported text and displays it using its extension-hidden path. | `cat NOTE`<br>`cat /DOCS/REPORT`<br>`cat "/DOCS/REPORT (2)"` |
+| `rename <display-source> <display-destination>` | Renames or moves a displayed regular file while preserving its hidden authoritative extension. | `rename NOTE MEMO`<br>`rename /DOCS/REPORT /DOCS/SUMMARY`<br>`rename /DOCS/NOTE /ARCHIVE/NOTE` |
+| `delete <display-path>` | Deletes the exact regular file selected by its displayed path. | `delete NOTE`<br>`delete /DOCS/REPORT`<br>`delete "/DOCS/REPORT (2)"` |
+| `search <extension>` | Recursively finds files with an exact extension and prints extension-hidden absolute paths. | `search DOC`<br>`search .TXT`<br>`search JPG` |
+| `dir [path]` | Lists display-safe entries in the current directory or a supplied directory. | `dir`<br>`dir /DOCS`<br>`dir .` |
+| `cd <path>` | Changes the calling console's current directory. | `cd /DOCS`<br>`cd ..`<br>`cd /` |
+| `pwd` | Prints the current directory. | `pwd` |
+| `mkdir <path>` | Creates a directory. | `mkdir /DOCS`<br>`mkdir ARCHIVE`<br>`mkdir /IMAGES` |
+| `rmdir <path>` | Removes an empty directory. | `rmdir EMPTY`<br>`rmdir /DOCS/OLD` |
+| `fileinfo <display-path>` | Shows privileged internal metadata for a file selected by its displayed path. | `fileinfo REPORT`<br>`fileinfo /DOCS/REPORT`<br>`fileinfo "/DOCS/REPORT (2)"` |
+| `hashinfo <display-or-canonical-path>` | Shows privileged extension-hash values and companion-record validation state. | `hashinfo REPORT`<br>`hashinfo /DOCS/REPORT`<br>`hashinfo /DOCS/REPORT.TXT` |
+| `fatinfo <display-or-canonical-path>` | Shows a privileged, bounded, validated cluster chain for a file. | `fatinfo REPORT`<br>`fatinfo /DOCS/REPORT`<br>`fatinfo /DOCS/REPORT.TXT` |

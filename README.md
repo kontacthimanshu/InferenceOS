@@ -73,7 +73,7 @@ Linux takes a more flexible approach. The Linux kernel does not fundamentally re
 
 ## InferenceOS takes a different architectural approach.
 
-A file's type information remains internal to the operating system and InferenceOS-FS, rather than forming part of the ordinary application-visible identity of the file. InferenceOS will never even expose the file's extensions from its API. This is because official API of different applications/software will be used by custom programs/applications to work on the file type extension they create/support.
+A file's type information remains internal to the operating system and InferenceOS-File System hereinafter called InferenceOS-FS, rather than forming part of the ordinary application-visible identity of the file. InferenceOS will never even expose the file's extensions from its API. This is because official API of different applications/software will be used by custom programs/applications to work on the file type extension they create/support.
 
 The user may see a file simply as:
 

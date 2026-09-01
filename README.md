@@ -48,6 +48,10 @@ In the above path the <user_name> is the name of the user's home folder which Wi
 
 - Click Next and in the next dialog click Finish button.
 
+- Your InferenceOS VM will be live in a few seconds and land on a command prompt like this "InferenceOS>".
+
+- To test the main feature you have to try some commands which are listed in a tabular format at the bottom of this ReadMe file.
+
 # InferenceOS
 
 InferenceOS is an experimental, open-source x86-64 operating-system which moves file-type knowledge away from the filename into an operating-system-controlled metadata and routing layer.

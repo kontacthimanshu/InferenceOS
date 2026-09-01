@@ -127,6 +127,10 @@ Now since Microsoft Word knows that these are the file extensions it needs to wo
 To illustrate this InferenceOS has two small applications called Doc Files and TXT Files which just show the files types they work on in their window. They are not yet ready to render file content. Notice the images below to see how file extension hiding takes place in CUI and GUI:
 ![GUI Mpde](./assets/images/fileexplorer.png)
 
+### CUI Mode
+
+![CUI Mode](./assets/images/cuimodedir.png)
+
 ## 1. It reduces filename-based deception
 
 In conventional systems, users and applications frequently reason from names such as:

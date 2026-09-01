@@ -124,7 +124,8 @@ Hiding extensions and using hash-based type lookup can reduce some attack surfac
 
 Now since Microsoft Word knows that these are the file extensions it needs to work properly, it would only ask for files having these extensions from InferenceOS but scoped to a folder not for the entire hard disk. And InferenceOS will search the InferenceOS-FS FAT file system by converting the file extensions requested into a hash and search the InferenceOS file system with some very fast hashing based searching algorithm rather than doing just string comparison in a loop. This brings performance gain. The performance gain has to be measured in different forms of computing servers based on InferenceOS would support.
 
-To illustrate this InferenceOS has two small applications called Doc Files and TXT Files which just show the files types they work on in their window. They are not yet ready to render file content.
+To illustrate this InferenceOS has two small applications called Doc Files and TXT Files which just show the files types they work on in their window. They are not yet ready to render file content. Notice the images below to see how file extension hiding takes place in CUI and GUI:
+![GUI Mpde](./assets/images/fileexplorer.png)
 
 ## 1. It reduces filename-based deception
 

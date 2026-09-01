@@ -56,6 +56,10 @@ C:\Users\<user_name>\source\repos\InferenceOS\ReadilyUsableHyperV-VM\Virtual Mac
 
 - To test the main feature you have to try some commands which are listed in a tabular format at the bottom of this ReadMe file.
 
+- Important commands to try are:
+- create - You will use this command to create a file with a three character extension for example, "resume.doc"
+- dir - This command will list the file(s) you just created with above command, but the output will not show the extension. That means the OS is hiding the extension. This is the crux. Rest is explained below.
+
 # InferenceOS
 
 InferenceOS is an experimental, open-source x86-64 operating-system which moves file-type knowledge away from the filename into an operating-system-controlled metadata and routing layer.
@@ -69,7 +73,9 @@ Linux takes a more flexible approach. The Linux kernel does not fundamentally re
 
 ## InferenceOS takes a different architectural approach.
 
-A file's type information remains internal to the operating system and InferenceOS-FS, rather than forming part of the ordinary application-visible identity of the file. The user may see a file simply as:
+A file's type information remains internal to the operating system and InferenceOS-FS, rather than forming part of the ordinary application-visible identity of the file. InferenceOS will never even expose the file's extensions from its API. This is because official API of different applications/software will be used by custom programs/applications to work on the file type extension they create/support.
+
+The user may see a file simply as:
 
 REPORT
 

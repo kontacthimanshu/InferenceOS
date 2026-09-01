@@ -69,13 +69,13 @@ both values (file type extention and file type extension hash); privileged diagn
 
 Traditional operating systems commonly allow file-type information to become part of the filename or application-visible naming convention. In Windows, a filename such as report.docx explicitly carries its extension, and that extension participates heavily in application association. Windows Explorer may hide known extensions from the user, but the extension remains part of the filename and is readily available to applications.
 
-Linux takes a more flexible approach. The Linux kernel does not fundamentally require filename extensions to determine what a file is. However, desktop environments and applications commonly rely on filename suffixes, MIME databases, file signatures, or combinations of these mechanisms to infer how a file should be handled.
+Linux takes a more flexible approach. The Linux kernel does not fundamentally require filename extensions to determine what a file is. However, desktop environments and applications commonly rely on filename suffixes, MIME databases, file signatures, or combinations of these mechanisms to **infer** how a file should be handled.
 
 ## InferenceOS takes a different architectural approach.
 
-A file's type information remains internal to the operating system and InferenceOS-File System hereinafter called InferenceOS-FS, rather than forming part of the ordinary application-visible identity of the file. InferenceOS will never even expose the file's extensions from its API. This is because official API of different applications/software will be used by custom programs/applications to work on the file type extension they create/support.
+A file's type information remains internal to the operating system and InferenceOS-File System (hereinafter called InferenceOS-FS), rather than forming part of the ordinary application-visible identity of the file. InferenceOS will never even expose the file's extension through its official OS level API which lets people make applications and platforms such as .NET in case of Windows or Shell in case of Linux. This is because official API of different applications/software/platforms will be used by custom programs/applications to work on the file type extension they create/support, for example Microsoft Office's official graph API or Openpyxl is used to work on excel files. But in binary mode the InferenceOS' official OS level API will allow to work on any file in binary mode as this does not expose the format of the file. The file system approach that InferenceOS is offering can be adopted in the kernels of any existing operating system such as Windows and Linux (Ubuntu).
 
-The user may see a file simply as:
+In InferenceOS Character User Interface or File Exploer the user may see a file simply as:
 
 REPORT
 
@@ -89,7 +89,7 @@ or:
 
 Give me every file matching *.DOC.
 
-Applications just ask for any particular file using its extensionless name and InferenceOS returns the file. If the file happnes to be in a format which the application software can work upon, well and good. Otherwise the there is an application error stating "Unexpected file format", or whatever suitable user friendly error message the application software wants to gracefully degrade with.
+Applications just ask for any particular file using its extensionless name and InferenceOS returns the file. If the file happnes to be in a format which the application software can work upon then it is fine, normal execution of the application software would follow. Otherwise there will be an application error stating "Unexpected file format", or whatever suitable user friendly error message the application software wants to gracefully degrade with.
 
 This architecture can provide a narrower and more controlled security boundary.
 
@@ -97,7 +97,7 @@ An ordinary application does not need unrestricted access to the internal extens
 
 Consequently, applications have less opportunity to independently reinterpret filenames, incorrectly parse extensions, or make conflicting decisions about file type.
 
-The approach also reduces the importance of filename-based deception. Names containing misleading combinations such as multiple extensions cannot be relied upon by applications as the authoritative declaration of file type, because InferenceOS would itself owns the type association if implemented as formal industry recognized operating system.
+The approach also reduces the importance of filename-based deception. Names containing misleading combinations such as multiple extensions cannot be relied upon by applications as the authoritative declaration of file type, because InferenceOS would itself own the type association if implemented as formal industry recognized operating system.
 
 The extension hash provides additional derived metadata that the operating system can use for efficient classification or very fast lookup.
 
@@ -111,8 +111,6 @@ The extension hash provides additional derived metadata that the operating syste
 
 #### InferenceOS: file → OS-controlled type metadata → validated application capability → opaque file access
 
-### It also gives the operating system one authoritative place to enforce which application is expected to receive which class of file.
-
 # Security
 
 Hiding extensions and using hash-based type lookup can reduce some attack surfaces, but it does not prevent hacking in general. Its value comes from changing who is allowed to know and interpret file type.
@@ -124,7 +122,9 @@ Hiding extensions and using hash-based type lookup can reduce some attack surfac
 #### For Example:
 ### An application like Microsoft Word which for example can operate on or work on/with, file type extensions like: *.doc, *.docx, *.jpg, *.img, *.pdf etc etc.
 
-Now since Microsoft Word knows that these are the file extensions it needs to work properly, it would only ask for files having these extensions from InferenceOS. And InferenceOS will search the InferenceOS-FS FAT file system by converting the file extensions requested into a hash and seach the InferenceOS file with some very fast hashing based searching algorithm rather than doing just string comparison. This brings performance gain. The performance gain has to be measured in different forms of computing servers based on InferenceOS would support.
+Now since Microsoft Word knows that these are the file extensions it needs to work properly, it would only ask for files having these extensions from InferenceOS but scoped to a folder not for the entire hard disk. And InferenceOS will search the InferenceOS-FS FAT file system by converting the file extensions requested into a hash and search the InferenceOS file system with some very fast hashing based searching algorithm rather than doing just string comparison in a loop. This brings performance gain. The performance gain has to be measured in different forms of computing servers based on InferenceOS would support.
+
+To illustrate this InferenceOS has two small applications called Doc Files and TXT Files which just show the files types they work on in their window. They are not yet ready to render file content.
 
 ## 1. It reduces filename-based deception
 

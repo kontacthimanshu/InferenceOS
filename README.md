@@ -10,6 +10,44 @@ InferenceOS is an operating system philosophy which has its roots in two of the 
 
 - Just import the VM and keep all the virtual machine related files in one folder.
 
+#### Steps to import VM
+
+- Clone this repository. 
+
+- Ensure that no HyperV virtual machine is selected inside Virtual Machines pane. This is to ensure that "Action" menu item does not trim/hide the "Import Virtual Machine" menu option.
+
+- Click on the menu option "Import Virtual Machine".
+
+- Click the "Browse" button in the diaglog box's right side pane to locate the cloned repositories' folder where VMs are kept. That folder is "ReadilyUsableHyperV-VM", which is also mentioned above.
+
+- Inside this folder locate another folder at following path:
+
+C:\Users\<user_name>\source\repos\InferenceOS\ReadilyUsableHyperV-VM\Virtual Machines
+
+In the above path the <user_name> is the name of the user's home folder which Windows created automatically. So you have to locate the above path inside your local user folder if you had cloned the repository there. Otherwise locate the "Virtual Machines" folder in the path where you have cloned the repo, whatever it is.
+
+- After selecting the "Virtual Machines" folder click "Next" button at the bottom of the dialog.
+
+- The next dialog pane will show you a virtual machine titled as "InferenceOS-HyperV", already selected and highlighted in blue background. If it is not selected for some reason, then select it.
+
+- Click Next.
+
+- In the next dialog you have three options and you have to select the third option which is "Copy the virtual machine".
+
+- Now click Next again.
+
+- Next dialog asks you the location where you want to store the virtual machine files. Create a folder at such a location in your system where the access to hard disk is not blocked by any organization process. This is because the current MVP is built to work in such a manner that it needs all the files in one folder.
+
+- So click on the check box titled as "Store the virtual machie in a different location.
+
+- In all three text boxes keep the same path which you created in previous step.
+
+- In the next dialog you will be asked to choose the location of virtual disk. 
+
+- In this text box also, you put the same path you put in last three text boxes on previous dialog page.
+
+- Click Next and in the next dialog click Finish button.
+
 # InferenceOS
 
 InferenceOS is an experimental, open-source x86-64 operating-system which moves file-type knowledge away from the filename into an operating-system-controlled metadata and routing layer.

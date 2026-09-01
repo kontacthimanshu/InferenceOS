@@ -24,7 +24,7 @@ InferenceOS is an operating system philosophy which has its roots in two of the 
 
 C:\Users\<user_name>\source\repos\InferenceOS\ReadilyUsableHyperV-VM\Virtual Machines
 
-In the above path the <user_name> is the name of the user's home folder which Windows created automatically. So you have to locate the above path inside your local user folder if you had cloned the repository there. Otherwise locate the "Virtual Machines" folder in the path where you have cloned the repo, whatever it is.
+- In the above path the <user_name> is the name of the user's home folder which Windows created automatically. So you have to locate the above path inside your local user folder if you had cloned the repository there. Otherwise locate the "Virtual Machines" folder in the path where you have cloned the repo, whatever it is.
 
 - After selecting the "Virtual Machines" folder click "Next" button at the bottom of the dialog.
 
@@ -48,7 +48,11 @@ In the above path the <user_name> is the name of the user's home folder which Wi
 
 - Click Next and in the next dialog click Finish button.
 
-- Your InferenceOS VM will be live in a few seconds and land on a command prompt like this "InferenceOS>".
+- Your InferenceOS VM will be live in a few seconds.
+
+- The VM will be in off state, you right click on the VM and click the menu item "Start" from the dropdown context menu.
+
+-  InferenceOS will boot and land on a command prompt like this "InferenceOS>".
 
 - To test the main feature you have to try some commands which are listed in a tabular format at the bottom of this ReadMe file.
 

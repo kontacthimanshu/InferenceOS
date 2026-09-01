@@ -36,9 +36,9 @@ In the above path the <user_name> is the name of the user's home folder which Wi
 
 - Now click Next again.
 
-- Next dialog asks you the location where you want to store the virtual machine files. Create a folder at such a location in your system where the access to hard disk is not blocked by any organization process. This is because the current MVP is built to work in such a manner that it needs all the files in one folder.
+- Next dialog asks you the location where you want to store the virtual machine files. Create a folder at such a location in your system where the access to hard disk is not blocked by any administrative security policy (local or group policy). This is because the current MVP is built to work in such a manner that it needs all the files in one folder.
 
-- So click on the check box titled as "Store the virtual machie in a different location.
+- So click on the check box titled as "Store the virtual machine in a different location.
 
 - In all three text boxes keep the same path which you created in previous step.
 

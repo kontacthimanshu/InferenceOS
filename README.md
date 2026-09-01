@@ -59,6 +59,7 @@ C:\Users\<user_name>\source\repos\InferenceOS\ReadilyUsableHyperV-VM\Virtual Mac
 - Important commands to try are:
 - create - You will use this command to create a file with a three character extension for example, "resume.doc"
 - dir - This command will list the file(s) you just created with above command, but the output will not show the extension. That means the OS is hiding the extension. This is the crux. Rest is explained below.
+- gui - This command takes you to graphical user interface of the MVP OS.
 
 # InferenceOS
 

@@ -1,5 +1,5 @@
 # Disclaimer
-InferenceOS is an operating system philosophy which has its roots in two of the world'd most prominent operating system philosophies as far as file system is concerned, namely Microsoft Windows and Linux. There is no intention to infringe on intellectual property and/or copyrights, goodwill of these operating systems.
+InferenceOS is an operating system (MVP) philosophy which has its roots in two of the world'd most prominent operating system philosophies as far as file system is concerned, namely Microsoft Windows and Linux. There is no intention to infringe on intellectual property and/or copyrights, goodwill of these operating systems.
 
 #### Git Repository: https://github.com/kontacthimanshu/InferenceOS
 
